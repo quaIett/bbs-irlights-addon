@@ -6,8 +6,10 @@
   "client": [
     "ExtraFormSectionMixin",
     "FormUtilsClientMixin",
+    "GameRendererLightMixin",
     "L10nMixin",
-    "UIFormEditorMixin"
+    "UIFormEditorMixin",
+    "bbs.WorldBlockEntityTickersAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

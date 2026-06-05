@@ -3,6 +3,7 @@ package org.wemppy.irlite.forms;
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.settings.values.core.ValueColor;
+import mchorse.bbs_mod.settings.values.numeric.ValueBoolean;
 import mchorse.bbs_mod.settings.values.numeric.ValueFloat;
 import mchorse.bbs_mod.utils.colors.Color;
 
@@ -15,6 +16,7 @@ public class SpotlightForm extends Form
     public final ValueFloat range = new ValueFloat("range", 12F, 0.1F, 128F);
     public final ValueFloat radius = new ValueFloat("radius", 35F, 1F, 179F);
     public final ValueFloat innerRadius = new ValueFloat("inner_radius", 25F, 1F, 179F);
+    public final ValueBoolean entitiesOnly = new ValueBoolean("entities_only", false);
 
     public SpotlightForm()
     {
@@ -23,6 +25,7 @@ public class SpotlightForm extends Form
         this.add(this.range);
         this.add(this.radius);
         this.add(this.innerRadius);
+        this.add(this.entitiesOnly);
     }
 
     @Override

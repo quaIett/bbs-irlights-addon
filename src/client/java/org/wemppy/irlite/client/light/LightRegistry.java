@@ -29,6 +29,7 @@ public final class LightRegistry
     private static final float[] dz = new float[MAX];
     private static final float[] cosOuter = new float[MAX];
     private static final float[] cosInner = new float[MAX];
+    private static final boolean[] entitiesOnly = new boolean[MAX];
     private static final long[] id = new long[MAX];
 
     private static int count;
@@ -36,7 +37,7 @@ public final class LightRegistry
     private LightRegistry()
     {}
 
-    public static void registerPoint(float x, float y, float z, float r, float g, float b, float in, float rad, long identity)
+    public static void registerPoint(float x, float y, float z, float r, float g, float b, float in, float rad, boolean eOnly, long identity)
     {
         int i = slot(identity);
         if (i < 0)
@@ -50,9 +51,10 @@ public final class LightRegistry
         intensity[i] = in; radius[i] = rad;
         dx[i] = 0F; dy[i] = 0F; dz[i] = 0F;
         cosOuter[i] = 1F; cosInner[i] = 1F;
+        entitiesOnly[i] = eOnly;
     }
 
-    public static void registerSpot(float x, float y, float z, float ndx, float ndy, float ndz, float r, float g, float b, float in, float range, float cosO, float cosI, long identity)
+    public static void registerSpot(float x, float y, float z, float ndx, float ndy, float ndz, float r, float g, float b, float in, float range, float cosO, float cosI, boolean eOnly, long identity)
     {
         int i = slot(identity);
         if (i < 0)
@@ -66,6 +68,7 @@ public final class LightRegistry
         intensity[i] = in; radius[i] = range;
         dx[i] = ndx; dy[i] = ndy; dz[i] = ndz;
         cosOuter[i] = cosO; cosInner[i] = cosI;
+        entitiesOnly[i] = eOnly;
     }
 
     /** Returns the slot for this identity (existing = overwrite, else a new one), or -1 if full. */
@@ -97,11 +100,11 @@ public final class LightRegistry
         {
             if (type[i] == 0)
             {
-                LightBuffer.addPoint(px[i], py[i], pz[i], cr[i], cg[i], cb[i], intensity[i], radius[i]);
+                LightBuffer.addPoint(px[i], py[i], pz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], entitiesOnly[i]);
             }
             else
             {
-                LightBuffer.addSpot(px[i], py[i], pz[i], dx[i], dy[i], dz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], cosOuter[i], cosInner[i]);
+                LightBuffer.addSpot(px[i], py[i], pz[i], dx[i], dy[i], dz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], cosOuter[i], cosInner[i], entitiesOnly[i]);
             }
         }
 

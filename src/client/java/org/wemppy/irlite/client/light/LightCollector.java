@@ -201,7 +201,7 @@ public final class LightCollector
         matrix.transform(origin);
 
         Color c = form.color.get();
-        LightRegistry.registerPoint(origin.x, origin.y, origin.z, c.r, c.g, c.b, form.intensity.get(), form.radius.get(), System.identityHashCode(form));
+        LightRegistry.registerPoint(origin.x, origin.y, origin.z, c.r, c.g, c.b, form.intensity.get(), form.radius.get(), form.entitiesOnly.get(), System.identityHashCode(form));
     }
 
     private static void emitSpot(SpotlightForm form, Matrix4f matrix)
@@ -227,6 +227,6 @@ public final class LightCollector
         float cosInner = (float) Math.cos(Math.toRadians(inner * 0.5F));
 
         Color c = form.color.get();
-        LightRegistry.registerSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, System.identityHashCode(form));
+        LightRegistry.registerSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, form.entitiesOnly.get(), System.identityHashCode(form));
     }
 }

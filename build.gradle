@@ -28,11 +28,30 @@ fabricApi {
 }
 
 repositories {
-    // Add repositories to retrieve artifacts from in here.
-    // You should only use this when depending on other mods because
-    // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-    // See https://docs.gradle.org/current/userguide/declaring_repositories.html
-    // for more information about repositories.
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+    // glsl-transformer (io.github.douira), an Iris runtime dependency.
+    maven { url = "https://maven.gegy.dev/" }
+    mavenCentral()
+}
+
+// Minecraft 1.20.1 ships LWJGL 3.3.1; a transitive dep bumps it to 3.3.2,
+// which Sodium refuses to start against. Pin every LWJGL module back to 3.3.1.
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == "org.lwjgl") {
+            details.useVersion "3.3.1"
+        }
+    }
 }
 
 dependencies {
@@ -44,6 +63,14 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 
     modImplementation files("libs/bbs-2.2-dev3-1.20.1.jar")
+
+    // Sodium + Iris, loaded in runClient.
+    modImplementation "maven.modrinth:sodium:mc1.20.1-0.5.11"
+    modImplementation "maven.modrinth:iris:1.7.2+1.20.1"
+
+    // Iris runtime dependencies (not auto-pulled from the Modrinth artifact).
+    modRuntimeOnly "org.anarres:jcpp:1.4.14"
+    modRuntimeOnly "io.github.douira:glsl-transformer:2.0.0-pre13"
 }
 
 processResources {

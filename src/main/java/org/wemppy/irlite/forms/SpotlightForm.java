@@ -12,17 +12,17 @@ public class SpotlightForm extends Form
 
     public final ValueColor color = new ValueColor("color", Color.white());
     public final ValueFloat intensity = new ValueFloat("intensity", 1F, 0F, 20F);
-    public final ValueFloat radius = new ValueFloat("radius", 12F, 0.1F, 128F);
-    public final ValueFloat angle = new ValueFloat("angle", 35F, 1F, 179F);
-    public final ValueFloat softness = new ValueFloat("softness", 0.3F, 0F, 1F);
+    public final ValueFloat range = new ValueFloat("range", 12F, 0.1F, 128F);
+    public final ValueFloat radius = new ValueFloat("radius", 35F, 1F, 179F);
+    public final ValueFloat innerRadius = new ValueFloat("inner_radius", 25F, 1F, 179F);
 
     public SpotlightForm()
     {
         this.add(this.color);
         this.add(this.intensity);
+        this.add(this.range);
         this.add(this.radius);
-        this.add(this.angle);
-        this.add(this.softness);
+        this.add(this.innerRadius);
     }
 
     @Override

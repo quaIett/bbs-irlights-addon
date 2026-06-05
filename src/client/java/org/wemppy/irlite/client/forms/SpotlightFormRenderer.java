@@ -28,6 +28,6 @@ public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightFo
     @Override
     protected void renderGuide(FormRenderingContext context, Color color)
     {
-        LightGuideRenderer.renderSpotlight(context.stack, color, this.form.radius.get(), this.form.angle.get(), this.form.softness.get());
+        LightGuideRenderer.renderSpotlight(context.stack, color, this.form.range.get(), this.form.radius.get(), this.form.innerRadius.get());
     }
 }

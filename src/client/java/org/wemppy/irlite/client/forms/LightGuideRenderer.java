@@ -41,24 +41,24 @@ final class LightGuideRenderer
         });
     }
 
-    public static void renderSpotlight(MatrixStack stack, Color color, float radius, float angle, float softness)
+    public static void renderSpotlight(MatrixStack stack, Color color, float range, float outerAngle, float innerAngle)
     {
-        float range = Math.max(radius, 0.05F);
-        float outer = Math.max(angle, 1F);
-        float inner = outer * (1F - clamp01(softness));
-        float outerR = coneRadius(range, outer);
-        float t = clamp(range * 0.0020F, 0.002F, 0.009F);
+        float r = Math.max(range, 0.05F);
+        float outer = Math.max(outerAngle, 1F);
+        float inner = clamp(innerAngle, 1F, outer);
+        float outerR = coneRadius(r, outer);
+        float t = clamp(r * 0.0020F, 0.002F, 0.009F);
 
         renderTriangles((builder) ->
         {
-            line(builder, stack, 0, 0, 0, 0, 0, -range, t, color, AXIS_ALPHA);
-            coneWire(builder, stack, -range, outerR, t, color, WIRE_ALPHA);
-            ringAtZ(builder, stack, range, outerR, t, color, WIRE_ALPHA);
+            line(builder, stack, 0, 0, 0, 0, 0, -r, t, color, AXIS_ALPHA);
+            coneWire(builder, stack, -r, outerR, t, color, WIRE_ALPHA);
+            ringAtZ(builder, stack, r, outerR, t, color, WIRE_ALPHA);
 
-            if (softness > 0.001F)
+            if (inner < outer)
             {
-                float innerR = coneRadius(range, inner);
-                ringAtZ(builder, stack, range, innerR, t, color, AXIS_ALPHA * 0.7F);
+                float innerR = coneRadius(r, inner);
+                ringAtZ(builder, stack, r, innerR, t, color, AXIS_ALPHA * 0.7F);
             }
         });
     }
@@ -175,10 +175,5 @@ final class LightGuideRenderer
     private static float clamp(float value, float min, float max)
     {
         return Math.max(min, Math.min(max, value));
-    }
-
-    private static float clamp01(float value)
-    {
-        return clamp(value, 0F, 1F);
     }
 }

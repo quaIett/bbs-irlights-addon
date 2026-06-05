@@ -207,17 +207,12 @@ public final class LightCollector
             dz = forward.z / len;
         }
 
-        float outer = form.angle.get();
-        float inner = outer * (1F - clamp01(form.softness.get()));
+        float outer = form.radius.get();
+        float inner = Math.min(form.innerRadius.get(), outer);
         float cosOuter = (float) Math.cos(Math.toRadians(outer * 0.5F));
         float cosInner = (float) Math.cos(Math.toRadians(inner * 0.5F));
 
         Color c = form.color.get();
-        LightBuffer.addSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.radius.get(), cosOuter, cosInner);
-    }
-
-    private static float clamp01(float value)
-    {
-        return Math.max(0F, Math.min(1F, value));
+        LightBuffer.addSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner);
     }
 }

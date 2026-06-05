@@ -11,7 +11,8 @@
     "UIFormEditorMixin",
     "UISettingsOverlayPanelMixin",
     "bbs.WorldBlockEntityTickersAccessor",
-    "iris.ProgramSamplersBuilderMixin"
+    "iris.ProgramSamplersBuilderMixin",
+    "iris.SamplerBindingCubeArrayMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -73,6 +73,43 @@ public final class ShadowRenderer
         applyMatrices(proj);
     }
 
+    public static void beginPointFace(int slot, int face,
+                                      float lpx, float lpy, float lpz,
+                                      float radius)
+    {
+        savePassState();
+
+        PointShadowArray.bindFaceForRender(slot, face);
+        int fs = PointShadowArray.FACE_SIZE;
+        GL11.glViewport(0, 0, fs, fs);
+        GL11.glEnable(GL11.GL_SCISSOR_TEST);
+        GL11.glScissor(0, 0, fs, fs);
+        GL11.glClearDepth(1.0);
+        GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
+
+        float far = Math.max(radius, NEAR + 0.1f);
+        Matrix4f proj = new Matrix4f().perspective((float) Math.toRadians(90.0), 1.0f, NEAR, far);
+
+        float dx, dy, dz, ux, uy, uz;
+        switch (face)
+        {
+            case 0:  dx =  1; dy =  0; dz =  0; ux = 0; uy = -1; uz =  0; break; // +X
+            case 1:  dx = -1; dy =  0; dz =  0; ux = 0; uy = -1; uz =  0; break; // -X
+            case 2:  dx =  0; dy =  1; dz =  0; ux = 0; uy =  0; uz =  1; break; // +Y
+            case 3:  dx =  0; dy = -1; dz =  0; ux = 0; uy =  0; uz = -1; break; // -Y
+            case 4:  dx =  0; dy =  0; dz =  1; ux = 0; uy = -1; uz =  0; break; // +Z
+            default: dx =  0; dy =  0; dz = -1; ux = 0; uy = -1; uz =  0; break; // -Z
+        }
+
+        currentView.identity().lookAt(
+            lpx, lpy, lpz,
+            lpx + dx, lpy + dy, lpz + dz,
+            ux, uy, uz
+        );
+
+        applyMatrices(proj);
+    }
+
     public static void renderEntity(Entity entity, float tickDelta)
     {
         if (entity == null || !inPass)

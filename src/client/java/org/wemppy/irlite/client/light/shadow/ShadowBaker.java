@@ -42,7 +42,7 @@ public final class ShadowBaker
         {
             return;
         }
-        if (!hasSpot())
+        if (LightRegistry.getCount() == 0)
         {
             return;
         }
@@ -107,19 +107,58 @@ public final class ShadowBaker
             LightRegistry.setShadowTile(i, tile);
             tile++;
         }
-    }
 
-    private static boolean hasSpot()
-    {
-        int n = LightRegistry.getCount();
-        for (int i = 0; i < n; i++)
+        // --- point lights: cube-array, 6 faces each ---
+        int layer = 0;
+        for (int i = 0; i < n && layer < PointShadowArray.MAX_SHADOWS; i++)
         {
-            if (LightRegistry.getType(i) == 1)
+            if (LightRegistry.getType(i) != 0)
             {
-                return true;
+                continue;
             }
+
+            float lx = LightRegistry.getX(i);
+            float ly = LightRegistry.getY(i);
+            float lz = LightRegistry.getZ(i);
+            float radius = LightRegistry.getRange(i);
+            if (radius < 1e-3f)
+            {
+                continue;
+            }
+
+            int inRange = 0;
+            for (int k = 0; k < occCount; k++)
+            {
+                float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
+                float reach = radius + orad[k];
+                if (ddx * ddx + ddy * ddy + ddz * ddz <= reach * reach)
+                {
+                    inRange++;
+                }
+            }
+            if (inRange == 0)
+            {
+                continue;
+            }
+
+            for (int face = 0; face < 6; face++)
+            {
+                ShadowRenderer.beginPointFace(layer, face, lx, ly, lz, radius);
+                for (int k = 0; k < occCount; k++)
+                {
+                    float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
+                    float reach = radius + orad[k];
+                    if (ddx * ddx + ddy * ddy + ddz * ddz <= reach * reach)
+                    {
+                        ShadowRenderer.renderEntity(occ[k], tickDelta);
+                    }
+                }
+                ShadowRenderer.endPass();
+            }
+
+            LightRegistry.setShadowTile(i, layer);
+            layer++;
         }
-        return false;
     }
 
     private static void collect(ClientWorld world, Vec3d cameraPos, float tickDelta)

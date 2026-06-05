@@ -10,6 +10,7 @@
     "L10nMixin",
     "UIFormEditorMixin",
     "UISettingsOverlayPanelMixin",
+    "bbs.FilmsAccessor",
     "bbs.WorldBlockEntityTickersAccessor",
     "iris.ProgramSamplersBuilderMixin",
     "iris.SamplerBindingCubeArrayMixin"

@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.VertexSorter;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.client.renderer.MorphRenderer;
 import mchorse.bbs_mod.forms.FormUtilsClient;
+import mchorse.bbs_mod.forms.entities.IEntity;
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.renderers.FormRenderer;
 import mchorse.bbs_mod.forms.renderers.FormRenderType;
@@ -23,6 +24,7 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.RotationAxis;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
@@ -125,6 +127,7 @@ public final class ShadowRenderer
 
     public static final int CASTER_ENTITY = 0;
     public static final int CASTER_MODEL_BLOCK = 1;
+    public static final int CASTER_REPLAY = 2;
 
     public static void renderCaster(Object caster, int casterType, float tickDelta)
     {
@@ -150,6 +153,9 @@ public final class ShadowRenderer
             {
                 case CASTER_MODEL_BLOCK:
                     drawModelBlock((ModelBlockEntity) caster, matrices, immediate, camera, tickDelta);
+                    break;
+                case CASTER_REPLAY:
+                    drawReplay((IEntity) caster, matrices, camera, tickDelta);
                     break;
                 case CASTER_ENTITY:
                 default:
@@ -231,6 +237,32 @@ public final class ShadowRenderer
         {
             renderer.render(new FormRenderingContext()
                 .set(FormRenderType.MODEL_BLOCK, mbe.getEntity(), matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
+                .camera(camera));
+        }
+        matrices.pop();
+    }
+
+    private static void drawReplay(IEntity stub, MatrixStack matrices, Camera camera, float tickDelta)
+    {
+        Form form = stub.getForm();
+        if (form == null)
+        {
+            return;
+        }
+
+        double fx = MathHelper.lerp(tickDelta, stub.getPrevX(), stub.getX());
+        double fy = MathHelper.lerp(tickDelta, stub.getPrevY(), stub.getY());
+        double fz = MathHelper.lerp(tickDelta, stub.getPrevZ(), stub.getZ());
+        float bodyYaw = MathHelper.lerp(tickDelta, stub.getPrevBodyYaw(), stub.getBodyYaw());
+
+        matrices.push();
+        matrices.translate(fx, fy, fz);
+        matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-bodyYaw));
+        FormRenderer<?> renderer = FormUtilsClient.getRenderer(form);
+        if (renderer != null)
+        {
+            renderer.render(new FormRenderingContext()
+                .set(FormRenderType.ENTITY, stub, matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
                 .camera(camera));
         }
         matrices.pop();

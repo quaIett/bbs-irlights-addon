@@ -1,8 +1,18 @@
 package org.wemppy.irlite.client.light.shadow;
 
+import io.netty.util.collection.IntObjectMap;
+import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.blocks.entities.ModelProperties;
+import mchorse.bbs_mod.film.BaseFilmController;
+import mchorse.bbs_mod.film.Films;
+import mchorse.bbs_mod.film.replays.Replay;
+import mchorse.bbs_mod.forms.entities.IEntity;
 import mchorse.bbs_mod.forms.forms.Form;
+import mchorse.bbs_mod.ui.dashboard.UIDashboard;
+import mchorse.bbs_mod.ui.film.UIFilmPanel;
+import mchorse.bbs_mod.ui.film.controller.FilmEditorController;
+import mchorse.bbs_mod.ui.film.controller.UIFilmController;
 import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.world.ClientWorld;
@@ -15,6 +25,7 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.chunk.BlockEntityTickInvoker;
 import org.wemppy.irlite.client.light.LightRegistry;
+import org.wemppy.irlite.mixin.client.bbs.FilmsAccessor;
 import org.wemppy.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
 
 import java.util.List;
@@ -195,6 +206,118 @@ public final class ShadowBaker
 
         // --- BBS model blocks (BlockEntity, not in world.getEntities()) ---
         collectModelBlocks(world, camX, camY, camZ);
+
+        // --- BBS film replays (non-actor stubs; actors are real entities above) ---
+        collectFilmReplays(camX, camY, camZ, tickDelta);
+    }
+
+    private static void collectFilmReplays(double camX, double camY, double camZ, float tickDelta)
+    {
+        Films films;
+        try { films = BBSModClient.getFilms(); }
+        catch (Throwable t) { return; }
+        if (films == null)
+        {
+            return;
+        }
+
+        List<BaseFilmController> ctrls;
+        try { ctrls = ((FilmsAccessor) (Object) films).irlite$getControllers(); }
+        catch (Throwable t) { ctrls = null; }
+
+        FilmEditorController editor = getActiveEditorController();
+        int worldN = ctrls == null ? 0 : ctrls.size();
+        int total = worldN + (editor != null ? 1 : 0);
+
+        for (int ci = 0; ci < total && occCount < MAX_OCCLUDERS; ci++)
+        {
+            BaseFilmController ctrl = ci < worldN ? ctrls.get(ci) : editor;
+            if (ctrl == null || ctrl.film == null || ctrl.film.replays == null)
+            {
+                continue;
+            }
+
+            List<Replay> replays;
+            try { replays = ctrl.film.replays.getList(); }
+            catch (Throwable t) { continue; }
+            if (replays == null || replays.isEmpty())
+            {
+                continue;
+            }
+
+            for (IntObjectMap.PrimitiveEntry<IEntity> e : ctrl.getEntities().entries())
+            {
+                if (occCount >= MAX_OCCLUDERS)
+                {
+                    break;
+                }
+                int rid = e.key();
+                if (rid < 0 || rid >= replays.size())
+                {
+                    continue;
+                }
+                Replay replay = replays.get(rid);
+                if (replay == null || replay.actor.get())
+                {
+                    continue;
+                }
+                IEntity ent = e.value();
+                if (ent == null)
+                {
+                    continue;
+                }
+                Form form = ent.getForm();
+                if (form == null)
+                {
+                    continue;
+                }
+
+                double wx = MathHelper.lerp(tickDelta, ent.getPrevX(), ent.getX());
+                double wy = MathHelper.lerp(tickDelta, ent.getPrevY(), ent.getY());
+                double wz = MathHelper.lerp(tickDelta, ent.getPrevZ(), ent.getZ());
+
+                double dx = wx - camX, dy = wy - camY, dz = wz - camZ;
+                if (dx * dx + dy * dy + dz * dz > COLLECT_DIST_SQ)
+                {
+                    continue;
+                }
+
+                float hbW = form.hitboxWidth.get();
+                float hbH = form.hitboxHeight.get();
+                float ey = Math.max(0.05f, hbH * 0.5f);
+                float rad = Math.max(0.05f, Math.max(hbW * 0.5f, ey)) + OVERLAP_MARGIN;
+
+                occ[occCount] = ent;
+                occType[occCount] = ShadowRenderer.CASTER_REPLAY;
+                ox[occCount] = (float) wx;
+                oy[occCount] = (float) (wy + ey);
+                oz[occCount] = (float) wz;
+                orad[occCount] = rad;
+                occCount++;
+            }
+        }
+    }
+
+    private static FilmEditorController getActiveEditorController()
+    {
+        try
+        {
+            UIDashboard dashboard = BBSModClient.getDashboardIfCreated();
+            if (dashboard == null)
+            {
+                return null;
+            }
+            if (!(dashboard.getPanels().panel instanceof UIFilmPanel filmPanel))
+            {
+                return null;
+            }
+            UIFilmController uiCtrl = filmPanel.getController();
+            return uiCtrl == null ? null : uiCtrl.editorController;
+        }
+        catch (Throwable t)
+        {
+            return null;
+        }
     }
 
     private static void collectModelBlocks(ClientWorld world, double camX, double camY, double camZ)

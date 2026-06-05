@@ -15,6 +15,7 @@ import mchorse.bbs_mod.ui.film.controller.FilmEditorController;
 import mchorse.bbs_mod.ui.film.controller.UIFilmController;
 import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -357,6 +358,15 @@ public final class ShadowBaker
     {
         try
         {
+            // Only when the dashboard is actually open. getDashboardIfCreated
+            // returns the cached instance even after closing to the world, so
+            // without this its film panel keeps reporting the replay stub and
+            // we'd bake a shadow for a replay that's no longer rendered.
+            if (MinecraftClient.getInstance().currentScreen == null)
+            {
+                return null;
+            }
+
             UIDashboard dashboard = BBSModClient.getDashboardIfCreated();
             if (dashboard == null)
             {

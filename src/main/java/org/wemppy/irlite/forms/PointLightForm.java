@@ -14,6 +14,9 @@ public class PointLightForm extends Form
     public final ValueColor color = new ValueColor("color", Color.white());
     public final ValueFloat intensity = new ValueFloat("intensity", 1F, 0F, 20F);
     public final ValueFloat radius = new ValueFloat("radius", 6F, 0.1F, 64F);
+    public final ValueFloat beamStrength = new ValueFloat("beam_strength", 1F, 0F, 5F);
+    public final ValueFloat anisotropy = new ValueFloat("anisotropy", 0.4F, -0.95F, 0.95F);
+    public final ValueFloat vlDensity = new ValueFloat("vl_density", 0.05F, 0.005F, 0.5F);
     public final ValueBoolean entitiesOnly = new ValueBoolean("entities_only", false);
 
     public PointLightForm()
@@ -21,6 +24,9 @@ public class PointLightForm extends Form
         this.add(this.color);
         this.add(this.intensity);
         this.add(this.radius);
+        this.add(this.beamStrength);
+        this.add(this.anisotropy);
+        this.add(this.vlDensity);
         this.add(this.entitiesOnly);
     }
 

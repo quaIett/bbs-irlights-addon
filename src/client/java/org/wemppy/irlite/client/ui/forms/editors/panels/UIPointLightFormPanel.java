@@ -15,6 +15,9 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
     public UIColor color;
     public UITrackpad intensity;
     public UITrackpad radius;
+    public UITrackpad beamStrength;
+    public UITrackpad anisotropy;
+    public UITrackpad vlDensity;
     public UIToggle entitiesOnly;
 
     public UIPointLightFormPanel(UIForm editor)
@@ -24,11 +27,17 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.color = new UIColor((c) -> this.form.color.set(Color.rgba(c))).withAlpha();
         this.intensity = new UITrackpad((v) -> this.form.intensity.set(v.floatValue())).limit(0, 20);
         this.radius = new UITrackpad((v) -> this.form.radius.set(v.floatValue())).limit(0.1, 64);
+        this.beamStrength = new UITrackpad((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 5);
+        this.anisotropy = new UITrackpad((v) -> this.form.anisotropy.set(v.floatValue())).limit(-0.95, 0.95);
+        this.vlDensity = new UITrackpad((v) -> this.form.vlDensity.set(v.floatValue())).limit(0.005, 0.5);
         this.entitiesOnly = new UIToggle(IKey.constant("Entities only"), (b) -> this.form.entitiesOnly.set(b.getValue()));
 
         this.options.add(UI.label(IKey.constant("Color")), this.color);
         this.options.add(UI.label(IKey.constant("Intensity")), this.intensity);
         this.options.add(UI.label(IKey.constant("Radius")), this.radius);
+        this.options.add(UI.label(IKey.constant("Beam strength")), this.beamStrength);
+        this.options.add(UI.label(IKey.constant("Anisotropy")), this.anisotropy);
+        this.options.add(UI.label(IKey.constant("VL density")), this.vlDensity);
         this.options.add(this.entitiesOnly);
     }
 
@@ -40,6 +49,9 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.color.setColor(form.color.get().getARGBColor());
         this.intensity.setValue(form.intensity.get());
         this.radius.setValue(form.radius.get());
+        this.beamStrength.setValue(form.beamStrength.get());
+        this.anisotropy.setValue(form.anisotropy.get());
+        this.vlDensity.setValue(form.vlDensity.get());
         this.entitiesOnly.setValue(form.entitiesOnly.get());
     }
 }

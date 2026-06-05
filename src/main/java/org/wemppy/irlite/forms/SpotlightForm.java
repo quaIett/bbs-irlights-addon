@@ -16,6 +16,9 @@ public class SpotlightForm extends Form
     public final ValueFloat range = new ValueFloat("range", 12F, 0.1F, 128F);
     public final ValueFloat radius = new ValueFloat("radius", 35F, 1F, 179F);
     public final ValueFloat innerRadius = new ValueFloat("inner_radius", 25F, 1F, 179F);
+    public final ValueFloat beamStrength = new ValueFloat("beam_strength", 1F, 0F, 5F);
+    public final ValueFloat anisotropy = new ValueFloat("anisotropy", 0.4F, -0.95F, 0.95F);
+    public final ValueFloat vlDensity = new ValueFloat("vl_density", 0.05F, 0.005F, 0.5F);
     public final ValueBoolean entitiesOnly = new ValueBoolean("entities_only", false);
 
     public SpotlightForm()
@@ -25,6 +28,9 @@ public class SpotlightForm extends Form
         this.add(this.range);
         this.add(this.radius);
         this.add(this.innerRadius);
+        this.add(this.beamStrength);
+        this.add(this.anisotropy);
+        this.add(this.vlDensity);
         this.add(this.entitiesOnly);
     }
 

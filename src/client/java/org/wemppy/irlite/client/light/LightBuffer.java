@@ -17,6 +17,7 @@ import java.nio.ByteBuffer;
  *       vec4 colorIntensity;  // rgb = linear color, a = intensity
  *       vec4 dirType;         // xyz = direction (spot, normalized), w = type (0 point, 1 spot)
  *       vec4 cone;            // x = cos(outerAngle/2), y = cos(innerAngle/2), z = entitiesOnly (0/1), w = pad
+ *       vec4 vlParams;        // x = anisotropy (HG g), y = vlDensity, z = beamStrength, w = pad
  *   };
  *
  *   layout(std430, binding = BINDING) buffer IrliteLights {
@@ -31,7 +32,7 @@ public final class LightBuffer
     public static final int MAX_LIGHTS = 256;
 
     private static final int HEADER_BYTES = 16;     // uint count + 12 B pad (std430 vec4 align)
-    private static final int LIGHT_BYTES = 64;      // 4 × vec4
+    private static final int LIGHT_BYTES = 80;      // 5 × vec4
     private static final int CAPACITY = HEADER_BYTES + MAX_LIGHTS * LIGHT_BYTES;
 
     private static int ssbo = 0;
@@ -71,7 +72,7 @@ public final class LightBuffer
         scratch.position(HEADER_BYTES);
     }
 
-    public static void addPoint(float x, float y, float z, float r, float g, float b, float intensity, float radius, boolean entitiesOnly)
+    public static void addPoint(float x, float y, float z, float r, float g, float b, float intensity, float radius, boolean entitiesOnly, float anisotropy, float density, float beam)
     {
         if (count >= MAX_LIGHTS)
         {
@@ -82,11 +83,12 @@ public final class LightBuffer
         scratch.putFloat(r).putFloat(g).putFloat(b).putFloat(intensity);
         scratch.putFloat(0F).putFloat(0F).putFloat(0F).putFloat(0F);  // dir=0, type=point
         scratch.putFloat(1F).putFloat(1F).putFloat(entitiesOnly ? 1F : 0F).putFloat(0F);  // cone: full, z=entitiesOnly
+        scratch.putFloat(anisotropy).putFloat(density).putFloat(beam).putFloat(0F);
 
         count++;
     }
 
-    public static void addSpot(float x, float y, float z, float dx, float dy, float dz, float r, float g, float b, float intensity, float radius, float cosOuter, float cosInner, boolean entitiesOnly)
+    public static void addSpot(float x, float y, float z, float dx, float dy, float dz, float r, float g, float b, float intensity, float radius, float cosOuter, float cosInner, boolean entitiesOnly, float anisotropy, float density, float beam)
     {
         if (count >= MAX_LIGHTS)
         {
@@ -97,6 +99,7 @@ public final class LightBuffer
         scratch.putFloat(r).putFloat(g).putFloat(b).putFloat(intensity);
         scratch.putFloat(dx).putFloat(dy).putFloat(dz).putFloat(1F);   // type=spot
         scratch.putFloat(cosOuter).putFloat(cosInner).putFloat(entitiesOnly ? 1F : 0F).putFloat(0F);
+        scratch.putFloat(anisotropy).putFloat(density).putFloat(beam).putFloat(0F);
 
         count++;
     }

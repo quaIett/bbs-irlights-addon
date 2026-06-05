@@ -10,7 +10,8 @@
     "L10nMixin",
     "UIFormEditorMixin",
     "UISettingsOverlayPanelMixin",
-    "bbs.WorldBlockEntityTickersAccessor"
+    "bbs.WorldBlockEntityTickersAccessor",
+    "iris.ProgramSamplersBuilderMixin"
   ],
   "injectors": {
     "defaultRequire": 1

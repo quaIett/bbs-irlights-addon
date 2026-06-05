@@ -33,6 +33,7 @@ public final class LightRegistry
     private static final float[] anisotropy = new float[MAX];
     private static final float[] density = new float[MAX];
     private static final float[] beam = new float[MAX];
+    private static final int[] shadowTile = new int[MAX];
     private static final long[] id = new long[MAX];
 
     private static int count;
@@ -93,7 +94,37 @@ public final class LightRegistry
         }
 
         id[count] = identity;
+        shadowTile[count] = -1;
         return count++;
+    }
+
+    // --- accessors for the shadow baker (iterate spots, assign tiles) ---
+
+    public static int getCount()
+    {
+        return count;
+    }
+
+    public static int getType(int i)
+    {
+        return type[i];
+    }
+
+    public static float getX(int i) { return px[i]; }
+    public static float getY(int i) { return py[i]; }
+    public static float getZ(int i) { return pz[i]; }
+    public static float getDirX(int i) { return dx[i]; }
+    public static float getDirY(int i) { return dy[i]; }
+    public static float getDirZ(int i) { return dz[i]; }
+    public static float getRange(int i) { return radius[i]; }
+    public static float getCosOuter(int i) { return cosOuter[i]; }
+
+    public static void setShadowTile(int i, int tile)
+    {
+        if (i >= 0 && i < count)
+        {
+            shadowTile[i] = tile;
+        }
     }
 
     /** Pack the accumulated set into the GPU buffer and reset for the next frame. */
@@ -105,11 +136,11 @@ public final class LightRegistry
         {
             if (type[i] == 0)
             {
-                LightBuffer.addPoint(px[i], py[i], pz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], entitiesOnly[i], anisotropy[i], density[i], beam[i]);
+                LightBuffer.addPoint(px[i], py[i], pz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], entitiesOnly[i], anisotropy[i], density[i], beam[i], (float) shadowTile[i]);
             }
             else
             {
-                LightBuffer.addSpot(px[i], py[i], pz[i], dx[i], dy[i], dz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], cosOuter[i], cosInner[i], entitiesOnly[i], anisotropy[i], density[i], beam[i]);
+                LightBuffer.addSpot(px[i], py[i], pz[i], dx[i], dy[i], dz[i], cr[i], cg[i], cb[i], intensity[i], radius[i], cosOuter[i], cosInner[i], entitiesOnly[i], anisotropy[i], density[i], beam[i], (float) shadowTile[i]);
             }
         }
 

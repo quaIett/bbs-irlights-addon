@@ -16,6 +16,7 @@ import org.wemppy.irlite.client.light.IRLightRenderState;
 import org.wemppy.irlite.client.light.LightBuffer;
 import org.wemppy.irlite.client.light.LightCollector;
 import org.wemppy.irlite.client.light.LightRegistry;
+import org.wemppy.irlite.client.light.shadow.ShadowBaker;
 
 @Mixin(GameRenderer.class)
 public class GameRendererLightMixin
@@ -36,6 +37,16 @@ public class GameRendererLightMixin
         // this frame's ModelBlocks, then we flush all of them to the GPU.
         IRLightRenderState.beginFrame();
         LightCollector.collect(world, cameraPos);
+
+        // Bake spotlight shadow depth maps BEFORE the SSBO upload (sets each
+        // spot's shadow tile index) and before Iris activates (vanilla entity
+        // rendering writes into our depth FBO).
+        if (world != null && camera != null)
+        {
+            mc.getEntityRenderDispatcher().configure(world, camera, mc.getCameraEntity());
+        }
+        ShadowBaker.bake(world, cameraPos, tickDelta);
+
         LightRegistry.flush();
 
         int count = LightBuffer.getCount();

@@ -12,8 +12,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.wemppy.irlite.client.light.IRLightRenderState;
 import org.wemppy.irlite.client.light.LightBuffer;
 import org.wemppy.irlite.client.light.LightCollector;
+import org.wemppy.irlite.client.light.LightRegistry;
 
 @Mixin(GameRenderer.class)
 public class GameRendererLightMixin
@@ -29,9 +31,12 @@ public class GameRendererLightMixin
         Camera camera = mc.gameRenderer.getCamera();
         Vec3d cameraPos = camera != null ? camera.getPos() : Vec3d.ZERO;
 
-        LightBuffer.begin();
+        // Render-path registrations (live actors / replays) accumulated during the
+        // PREVIOUS frame's world render are still in the registry; the scanner adds
+        // this frame's ModelBlocks, then we flush all of them to the GPU.
+        IRLightRenderState.beginFrame();
         LightCollector.collect(world, cameraPos);
-        LightBuffer.upload();
+        LightRegistry.flush();
 
         int count = LightBuffer.getCount();
         if (count != irlite$lastLoggedCount)

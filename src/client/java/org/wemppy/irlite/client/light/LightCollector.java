@@ -4,6 +4,8 @@ import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.blocks.entities.ModelProperties;
 import mchorse.bbs_mod.forms.forms.BodyPart;
 import mchorse.bbs_mod.forms.forms.Form;
+import mchorse.bbs_mod.forms.renderers.FormRenderType;
+import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
 import mchorse.bbs_mod.utils.colors.Color;
 import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.block.entity.BlockEntity;
@@ -33,6 +35,18 @@ public final class LightCollector
 
     private LightCollector()
     {}
+
+    /**
+     * Ownership gate between the two registration paths. The scanner owns
+     * ModelBlock forms (registered here in clean world coords); the form
+     * render-path owns everything else (live actors, film replays). This
+     * prevents the same lamp registering twice with diverging coordinate
+     * frames (the render-path carries view rotation / BBS roll).
+     */
+    public static boolean isHandledByScanner(FormRenderingContext context)
+    {
+        return context != null && context.type == FormRenderType.MODEL_BLOCK;
+    }
 
     public static void collect(ClientWorld world, Vec3d cameraPos)
     {
@@ -187,7 +201,7 @@ public final class LightCollector
         matrix.transform(origin);
 
         Color c = form.color.get();
-        LightBuffer.addPoint(origin.x, origin.y, origin.z, c.r, c.g, c.b, form.intensity.get(), form.radius.get());
+        LightRegistry.registerPoint(origin.x, origin.y, origin.z, c.r, c.g, c.b, form.intensity.get(), form.radius.get(), System.identityHashCode(form));
     }
 
     private static void emitSpot(SpotlightForm form, Matrix4f matrix)
@@ -213,6 +227,6 @@ public final class LightCollector
         float cosInner = (float) Math.cos(Math.toRadians(inner * 0.5F));
 
         Color c = form.color.get();
-        LightBuffer.addSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner);
+        LightRegistry.registerSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, System.identityHashCode(form));
     }
 }

@@ -2,6 +2,7 @@ package org.wemppy.irlite.client.forms;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import mchorse.bbs_mod.BBSModClient;
+import mchorse.bbs_mod.client.BBSRendering;
 import mchorse.bbs_mod.client.BBSShaders;
 import mchorse.bbs_mod.forms.CustomVertexConsumerProvider;
 import mchorse.bbs_mod.forms.forms.Form;
@@ -15,6 +16,7 @@ import mchorse.bbs_mod.ui.utils.icons.Icon;
 import mchorse.bbs_mod.utils.colors.Color;
 import mchorse.bbs_mod.utils.colors.Colors;
 import org.wemppy.irlite.IrliteConfig;
+import org.wemppy.irlite.client.light.LightCollector;
 
 public abstract class AbstractLightFormRenderer<T extends Form> extends FormRenderer<T>
 {
@@ -29,10 +31,30 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
 
     protected abstract void renderGuide(FormRenderingContext context, Color color);
 
+    /** Register this light into the per-frame registry (render-path: live actors / replays). */
+    protected abstract void registerLight(FormRenderingContext context);
+
     @Override
     protected void render3D(FormRenderingContext context)
     {
         boolean editorPreview = context.type == FormRenderType.PREVIEW || context.modelRenderer || context.ui;
+
+        // World render path: register the light (unless the scanner owns it), draw guide.
+        if (!context.isPicking() && !context.ui && !BBSRendering.isIrisShadowPass()
+            && (context.type == FormRenderType.MODEL_BLOCK || context.type == FormRenderType.ENTITY))
+        {
+            if (!LightCollector.isHandledByScanner(context))
+            {
+                this.registerLight(context);
+            }
+
+            if (IrliteConfig.showGuides())
+            {
+                this.renderGuide(context, this.tintedColor(context));
+            }
+
+            return;
+        }
 
         if (editorPreview && !context.isPicking())
         {
@@ -43,11 +65,6 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
 
         if (!context.isPicking())
         {
-            if (IrliteConfig.showGuides() && (context.type == FormRenderType.ENTITY || context.type == FormRenderType.MODEL_BLOCK))
-            {
-                this.renderGuide(context, this.tintedColor(context));
-            }
-
             return;
         }
 

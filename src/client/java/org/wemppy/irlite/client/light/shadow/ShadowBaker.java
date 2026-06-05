@@ -55,6 +55,10 @@ public final class ShadowBaker
     private static final float[] orad = new float[MAX_OCCLUDERS];
     private static int occCount;
 
+    /** Scene hash of the last bake — when unchanged we skip the GL render and
+     *  reuse the depth maps from the previous frame (tiles are still assigned). */
+    private static double lastHash = Double.NaN;
+
     private ShadowBaker()
     {}
 
@@ -76,6 +80,14 @@ public final class ShadowBaker
         }
 
         int n = LightRegistry.getCount();
+
+        // Scene cache: if neither lights nor occluders moved since the last
+        // bake, skip the (expensive) GL depth render and reuse the existing
+        // depth maps. Tiles/slots are still assigned so the shader keeps
+        // reading the same valid maps.
+        double hash = sceneHash(n);
+        boolean dirty = Double.isNaN(lastHash) || hash != lastHash;
+        lastHash = hash;
 
         // --- spotlights: one perspective atlas tile each ---
         int tile = 0;
@@ -101,9 +113,12 @@ public final class ShadowBaker
             float dz = LightRegistry.getDirZ(i);
             float outerDeg = (float) Math.toDegrees(Math.acos(MathHelper.clamp(LightRegistry.getCosOuter(i), -1f, 1f)) * 2.0);
 
-            ShadowRenderer.beginSpot(tile, lx, ly, lz, dx, dy, dz, range, outerDeg);
-            renderInRange(lx, ly, lz, range, noEnt, tickDelta);
-            ShadowRenderer.endPass();
+            if (dirty)
+            {
+                ShadowRenderer.beginSpot(tile, lx, ly, lz, dx, dy, dz, range, outerDeg);
+                renderInRange(lx, ly, lz, range, noEnt, tickDelta);
+                ShadowRenderer.endPass();
+            }
 
             LightRegistry.setShadowTile(i, tile);
             tile++;
@@ -128,16 +143,37 @@ public final class ShadowBaker
                 continue;
             }
 
-            for (int face = 0; face < 6; face++)
+            if (dirty)
             {
-                ShadowRenderer.beginPointFace(layer, face, lx, ly, lz, radius);
-                renderInRange(lx, ly, lz, radius, noEnt, tickDelta);
-                ShadowRenderer.endPass();
+                for (int face = 0; face < 6; face++)
+                {
+                    ShadowRenderer.beginPointFace(layer, face, lx, ly, lz, radius);
+                    renderInRange(lx, ly, lz, radius, noEnt, tickDelta);
+                    ShadowRenderer.endPass();
+                }
             }
 
             LightRegistry.setShadowTile(i, layer);
             layer++;
         }
+    }
+
+    /** Additive position hash over all lights + occluders. Any movement (even
+     *  sub-block) changes the exact double, so equality means "nothing moved". */
+    private static double sceneHash(int n)
+    {
+        double h = n * 1000003.0 + occCount * 9973.0;
+        for (int i = 0; i < n; i++)
+        {
+            h += LightRegistry.getX(i) + LightRegistry.getY(i) * 7.0 + LightRegistry.getZ(i) * 13.0
+                + LightRegistry.getDirX(i) * 17.0 + LightRegistry.getDirY(i) * 19.0 + LightRegistry.getDirZ(i) * 23.0
+                + LightRegistry.getRange(i) * 29.0 + i * 0.123;
+        }
+        for (int k = 0; k < occCount; k++)
+        {
+            h += ox[k] * 2.0 + oy[k] * 3.0 + oz[k] * 5.0 + k * 0.071;
+        }
+        return h;
     }
 
     private static boolean skip(int k, boolean skipEntities)

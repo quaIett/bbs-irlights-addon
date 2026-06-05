@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "irlite",
+  "version": "${version}",
+  "name": "IRLite",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/irlite/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.wemppy.irlite.client.IrliteDataGenerator"
+    ],
+    "client": [
+      "org.wemppy.irlite.client.IrliteClient"
+    ],
+    "main": [
+      "org.wemppy.irlite.Irlite"
+    ]
+  },
+  "mixins": [
+    "irlite.mixins.json",
+    {
+      "config": "irlite.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}

@@ -2,9 +2,18 @@ package org.wemppy.irlite.client.light.shadow;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.systems.VertexSorter;
+import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
+import mchorse.bbs_mod.forms.FormUtilsClient;
+import mchorse.bbs_mod.forms.forms.Form;
+import mchorse.bbs_mod.forms.renderers.FormRenderer;
+import mchorse.bbs_mod.forms.renderers.FormRenderType;
+import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
+import mchorse.bbs_mod.utils.MatrixStackUtils;
+import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.LightmapTextureManager;
+import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.entity.EntityRenderDispatcher;
 import net.minecraft.client.util.math.MatrixStack;
@@ -110,32 +119,38 @@ public final class ShadowRenderer
         applyMatrices(proj);
     }
 
-    public static void renderEntity(Entity entity, float tickDelta)
+    public static final int CASTER_ENTITY = 0;
+    public static final int CASTER_MODEL_BLOCK = 1;
+
+    public static void renderCaster(Object caster, int casterType, float tickDelta)
     {
-        if (entity == null || !inPass)
+        if (caster == null || !inPass)
         {
             return;
         }
 
         MinecraftClient mc = MinecraftClient.getInstance();
+        Camera camera = mc.gameRenderer.getCamera();
         VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
         MatrixStack matrices = new MatrixStack();
 
+        // Form-renderer paths inherit GL state, so pin what we need per caster.
         RenderSystem.depthMask(true);
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
 
+        ShadowBakeState.setBaking(true);
         try
         {
-            double cx = MathHelper.lerp(tickDelta, entity.lastRenderX, entity.getX());
-            double cy = MathHelper.lerp(tickDelta, entity.lastRenderY, entity.getY());
-            double cz = MathHelper.lerp(tickDelta, entity.lastRenderZ, entity.getZ());
-            float yaw = entity.getYaw(tickDelta);
-
-            EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
-            if (dispatcher != null)
+            switch (casterType)
             {
-                dispatcher.render(entity, cx, cy, cz, yaw, tickDelta, matrices, immediate, FULL_LIGHT);
+                case CASTER_MODEL_BLOCK:
+                    drawModelBlock((ModelBlockEntity) caster, matrices, immediate, camera, tickDelta);
+                    break;
+                case CASTER_ENTITY:
+                default:
+                    drawEntity((Entity) caster, matrices, immediate, tickDelta);
+                    break;
             }
             immediate.draw();
         }
@@ -143,6 +158,57 @@ public final class ShadowRenderer
         {
             // swallow — a single bad caster must not abort the whole bake
         }
+        finally
+        {
+            ShadowBakeState.setBaking(false);
+        }
+    }
+
+    private static void drawEntity(Entity entity, MatrixStack matrices, VertexConsumerProvider.Immediate immediate, float tickDelta)
+    {
+        double cx = MathHelper.lerp(tickDelta, entity.lastRenderX, entity.getX());
+        double cy = MathHelper.lerp(tickDelta, entity.lastRenderY, entity.getY());
+        double cz = MathHelper.lerp(tickDelta, entity.lastRenderZ, entity.getZ());
+        float yaw = entity.getYaw(tickDelta);
+
+        EntityRenderDispatcher dispatcher = MinecraftClient.getInstance().getEntityRenderDispatcher();
+        if (dispatcher != null)
+        {
+            dispatcher.render(entity, cx, cy, cz, yaw, tickDelta, matrices, immediate, FULL_LIGHT);
+        }
+    }
+
+    private static void drawModelBlock(ModelBlockEntity mbe, MatrixStack matrices, VertexConsumerProvider.Immediate immediate, Camera camera, float tickDelta)
+    {
+        if (mbe.getProperties() == null)
+        {
+            return;
+        }
+        Form form = mbe.getProperties().getForm();
+        if (form == null)
+        {
+            return;
+        }
+        Transform t = mbe.getProperties().getTransform();
+
+        double feetX = mbe.getPos().getX() + 0.5 + (t == null ? 0 : t.translate.x);
+        double feetY = mbe.getPos().getY() + (t == null ? 0 : t.translate.y);
+        double feetZ = mbe.getPos().getZ() + 0.5 + (t == null ? 0 : t.translate.z);
+
+        matrices.push();
+        matrices.translate(feetX, feetY, feetZ);
+        if (t != null)
+        {
+            MatrixStackUtils.applyTransform(matrices, t);
+        }
+        FormRenderer<?> renderer = FormUtilsClient.getRenderer(form);
+        if (renderer != null)
+        {
+            renderer.render(new FormRenderingContext()
+                .set(FormRenderType.MODEL_BLOCK, mbe.getEntity(), matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
+                .camera(camera));
+        }
+        matrices.pop();
     }
 
     public static void endPass()

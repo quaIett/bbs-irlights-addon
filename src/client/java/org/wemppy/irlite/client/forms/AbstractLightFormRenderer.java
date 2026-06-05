@@ -17,6 +17,7 @@ import mchorse.bbs_mod.utils.colors.Color;
 import mchorse.bbs_mod.utils.colors.Colors;
 import org.wemppy.irlite.IrliteConfig;
 import org.wemppy.irlite.client.light.LightCollector;
+import org.wemppy.irlite.client.light.shadow.ShadowBakeState;
 
 public abstract class AbstractLightFormRenderer<T extends Form> extends FormRenderer<T>
 {
@@ -38,6 +39,13 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
     protected void render3D(FormRenderingContext context)
     {
         boolean editorPreview = context.type == FormRenderType.PREVIEW || context.modelRenderer || context.ui;
+
+        // Skip entirely while baking shadows — a light form inside a caster's
+        // form-tree would otherwise re-register every face/tile pass.
+        if (ShadowBakeState.isBaking())
+        {
+            return;
+        }
 
         // World render path: register the light (unless the scanner owns it), draw guide.
         if (!context.isPicking() && !context.ui && !BBSRendering.isIrisShadowPass()

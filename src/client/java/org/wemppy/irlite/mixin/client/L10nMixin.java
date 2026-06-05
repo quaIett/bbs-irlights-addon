@@ -17,5 +17,6 @@ public class L10nMixin
         self.getKey("bbs.config.irlite.title", "IRLite");
         self.getKey("bbs.config.irlite.tooltip", "IRLite light addon settings");
         self.getKey("bbs.config.irlite.show_guides", "Show light guides in world");
+        self.getKey("bbs.config.irlite.shadow_quality", "Shadow quality");
     }
 }

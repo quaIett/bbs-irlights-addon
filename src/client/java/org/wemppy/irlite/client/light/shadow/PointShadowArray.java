@@ -118,4 +118,15 @@ public final class PointShadowArray
         glFboId = 0;
         initialized = false;
     }
+
+    /** Switch per-face resolution; frees + re-inits the cube array on next access. */
+    public static void setFaceSize(int newSize)
+    {
+        if (newSize == FACE_SIZE)
+        {
+            return;
+        }
+        FACE_SIZE = newSize;
+        delete();
+    }
 }

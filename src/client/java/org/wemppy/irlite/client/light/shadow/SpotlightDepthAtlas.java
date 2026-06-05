@@ -124,4 +124,15 @@ public final class SpotlightDepthAtlas
         glFboId = 0;
         initialized = false;
     }
+
+    /** Switch tile resolution; frees + re-inits the atlas on next access. */
+    public static void setTileSize(int newSize)
+    {
+        if (newSize == TILE_SIZE)
+        {
+            return;
+        }
+        TILE_SIZE = newSize;
+        delete();
+    }
 }

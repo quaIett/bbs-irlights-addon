@@ -24,6 +24,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.chunk.BlockEntityTickInvoker;
+import org.wemppy.irlite.IrliteConfig;
 import org.wemppy.irlite.client.light.LightRegistry;
 import org.wemppy.irlite.mixin.client.bbs.FilmsAccessor;
 import org.wemppy.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
@@ -72,6 +73,9 @@ public final class ShadowBaker
         {
             return;
         }
+
+        // Apply the shadow resolution preset (no-op unless it changed).
+        IRLShadowQuality.applyFromSetting(IrliteConfig.shadowQuality());
 
         collect(world, cameraPos, tickDelta);
         if (occCount == 0)

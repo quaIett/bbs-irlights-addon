@@ -124,6 +124,11 @@ public final class LightRegistry
     public static float getCosOuter(int i) { return cosOuter[i]; }
     public static boolean getNoEntityShadows(int i) { return noEntityShadows[i]; }
 
+    /** Stable per-light identity (System.identityHashCode of the form). Used as
+     *  the key for the block-shadow + VBO caches, since registry slots are
+     *  reassigned every frame and aren't stable. */
+    public static long getId(int i) { return id[i]; }
+
     public static void setShadowTile(int i, int tile)
     {
         if (i >= 0 && i < count)

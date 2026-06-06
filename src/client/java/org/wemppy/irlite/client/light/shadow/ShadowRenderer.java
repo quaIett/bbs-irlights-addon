@@ -2,6 +2,10 @@ package org.wemppy.irlite.client.light.shadow;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.systems.VertexSorter;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.client.renderer.MorphRenderer;
 import mchorse.bbs_mod.forms.FormUtilsClient;
@@ -12,23 +16,39 @@ import mchorse.bbs_mod.forms.renderers.FormRenderType;
 import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
 import mchorse.bbs_mod.utils.MatrixStackUtils;
 import mchorse.bbs_mod.utils.pose.Transform;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gl.VertexBuffer;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.render.BufferBuilder;
 import net.minecraft.client.render.Camera;
+import net.minecraft.client.render.GameRenderer;
 import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.OverlayTexture;
+import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.RenderLayers;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.render.block.BlockRenderManager;
 import net.minecraft.client.render.entity.EntityRenderDispatcher;
 import net.minecraft.client.render.entity.LivingEntityRenderer;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.RotationAxis;
+import net.minecraft.util.math.random.Random;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
+
+import java.util.List;
 
 /**
  * Bakes spotlight shadow depth maps. Phase 1: perspective depth tile per spot,
@@ -266,6 +286,345 @@ public final class ShadowRenderer
                 .camera(camera));
         }
         matrices.pop();
+    }
+
+    // --- Block-shadow batch draw (non-full-shape blocks within an active pass) ---
+
+    private static boolean blockRenderErrorLogged = false;
+    private static final Random cutoutRandom = Random.create();
+
+    // --- Per-light block VBO cache (Stage B), keyed by LightRegistry.id ---
+    // The block list from BlockShadowCache is referentially stable on a cache
+    // hit (same List instance), so a reference compare detects a rebuild
+    // perfectly. One VertexBuffer per lamp, built once and redrawn across all
+    // 6 cube faces (point) / the single atlas tile (spot). Static lamps
+    // re-upload nothing. Evicted by retainBlockVbos when the lamp disappears.
+    private static final Long2ObjectOpenHashMap<VertexBuffer> blockVboById = new Long2ObjectOpenHashMap<>();
+    private static final Long2ObjectOpenHashMap<List<BlockShadowEntry>> blockVboListById = new Long2ObjectOpenHashMap<>();
+
+    /**
+     * Render a light's non-full-cube blocks into the currently-bound depth FBO,
+     * between a begin*()/endPass() bracket and after the entity casters. Two
+     * paths: cutout blocks bake from their textured BakedModel (alpha-test
+     * shader drops transparent texels), opaque shapes draw as a cached
+     * POSITION-only quad-box VBO decomposed from their VoxelShape AABBs.
+     */
+    public static void renderBlocksDepth(long id, List<BlockShadowEntry> blocks)
+    {
+        if (blocks == null || blocks.isEmpty() || !inPass)
+        {
+            return;
+        }
+
+        // Cutout blocks first (their own textured pass), then opaque AABBs.
+        renderBlocksDepthCutout(blocks);
+
+        boolean anyShape = false;
+        for (int i = 0, n = blocks.size(); i < n; i++)
+        {
+            BlockShadowEntry e = blocks.get(i);
+            if (e != null && e.shape != null)
+            {
+                anyShape = true;
+                break;
+            }
+        }
+        if (!anyShape)
+        {
+            // All entries were cutout — begin/end on an empty buffer would throw.
+            return;
+        }
+
+        ShadowBakeState.setBaking(true);
+        boolean culled = false;
+        try
+        {
+            // Second-depth shadow mapping: cull FRONT faces so the depth map
+            // stores each block's FAR side. The lit near surface then sits ~a
+            // block in front of the stored depth and can't self-shadow, which
+            // kills the terrain self-shadow acne that view bobbing turned into
+            // flicker (without forcing up the global shadow bias, which would
+            // peter-pan entity shadows). QuadBoxConsumer winding is consistent
+            // CCW-outward, so GL_FRONT culls the light-facing faces; entity
+            // casters, baked earlier in the same pass, keep their tight bias.
+            RenderSystem.enableCull();
+            GL11.glCullFace(GL11.GL_FRONT);
+            culled = true;
+            RenderSystem.depthMask(true);
+            RenderSystem.enableDepthTest();
+            RenderSystem.disableBlend();
+            RenderSystem.setShader(GameRenderer::getPositionProgram);
+
+            // Rebuild only when the list instance changed (BlockShadowCache
+            // returns the same instance on a hit) — static lamps just redraw.
+            VertexBuffer vb = blockVboById.get(id);
+            if (vb == null || blockVboListById.get(id) != blocks)
+            {
+                if (vb != null)
+                {
+                    try { vb.close(); } catch (Throwable ignored) {}
+                }
+                vb = buildBlockVbo(blocks);
+                blockVboById.put(id, vb);
+                blockVboListById.put(id, blocks);
+            }
+
+            if (vb != null)
+            {
+                vb.bind();
+                vb.draw(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix(), RenderSystem.getShader());
+                VertexBuffer.unbind();
+            }
+        }
+        catch (Throwable t)
+        {
+            if (!blockRenderErrorLogged)
+            {
+                blockRenderErrorLogged = true;
+                System.err.println("[irlite] renderBlocksDepth failed: " + t);
+                t.printStackTrace();
+            }
+            // Drop the (possibly broken) VBO so the next frame retries clean.
+            releaseBlockVbo(id);
+        }
+        finally
+        {
+            if (culled)
+            {
+                GL11.glCullFace(GL11.GL_BACK);   // restore MC's default cull face
+            }
+            ShadowBakeState.setBaking(false);
+        }
+    }
+
+    /** Build a STATIC POSITION VBO from a block list's shaped entries. Only
+     *  called when at least one entry has a shape, so the buffer is non-empty. */
+    private static VertexBuffer buildBlockVbo(List<BlockShadowEntry> blocks)
+    {
+        Tessellator tess = Tessellator.getInstance();
+        BufferBuilder buf = tess.getBuffer();
+        buf.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION);
+
+        QuadBoxConsumer consumer = new QuadBoxConsumer(buf);
+        for (int i = 0, n = blocks.size(); i < n; i++)
+        {
+            BlockShadowEntry entry = blocks.get(i);
+            if (entry == null || entry.shape == null)
+            {
+                continue;
+            }
+            consumer.ox = entry.pos.getX();
+            consumer.oy = entry.pos.getY();
+            consumer.oz = entry.pos.getZ();
+            entry.shape.forEachBox(consumer);
+        }
+
+        VertexBuffer vb = new VertexBuffer(VertexBuffer.Usage.STATIC);
+        vb.bind();
+        vb.upload(buf.end());
+        VertexBuffer.unbind();
+        return vb;
+    }
+
+    /** Free one lamp's cached block VBO. */
+    public static void releaseBlockVbo(long id)
+    {
+        VertexBuffer vb = blockVboById.remove(id);
+        if (vb != null)
+        {
+            try { vb.close(); } catch (Throwable ignored) {}
+        }
+        blockVboListById.remove(id);
+    }
+
+    /** Free block VBOs for lamps not in {@code liveIds} (gone, or feature off
+     *  -> empty set drains all). Run once per bake after the light loops. */
+    public static void retainBlockVbos(LongSet liveIds)
+    {
+        if (blockVboById.isEmpty())
+        {
+            return;
+        }
+        ObjectIterator<Long2ObjectMap.Entry<VertexBuffer>> it = blockVboById.long2ObjectEntrySet().iterator();
+        while (it.hasNext())
+        {
+            Long2ObjectMap.Entry<VertexBuffer> me = it.next();
+            if (!liveIds.contains(me.getLongKey()))
+            {
+                VertexBuffer vb = me.getValue();
+                if (vb != null)
+                {
+                    try { vb.close(); } catch (Throwable ignored) {}
+                }
+                blockVboListById.remove(me.getLongKey());
+                it.remove();
+            }
+        }
+    }
+
+    // Cutout blocks bake from their textured BakedModel through vanilla's
+    // alpha-test cutout shader so transparent texture pixels (door glass, iron
+    // grates, ladder gaps, leaves) let light pass through. immediate.draw binds
+    // the block atlas to Sampler0 and sets the cutout(_mipped) shader whose FS
+    // does the alpha discard; colour writes land on no attachment in our
+    // depth-only FBO, so only depth is recorded.
+    private static void renderBlocksDepthCutout(List<BlockShadowEntry> blocks)
+    {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        ClientWorld world = mc.world;
+        if (world == null)
+        {
+            return;
+        }
+
+        BlockRenderManager brm = mc.getBlockRenderManager();
+        if (brm == null)
+        {
+            return;
+        }
+
+        boolean any = false;
+        for (int i = 0, n = blocks.size(); i < n; i++)
+        {
+            BlockShadowEntry e = blocks.get(i);
+            if (e != null && e.cutout)
+            {
+                any = true;
+                break;
+            }
+        }
+        if (!any)
+        {
+            return;
+        }
+
+        VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
+
+        ShadowBakeState.setBaking(true);
+        try
+        {
+            RenderSystem.depthMask(true);
+            RenderSystem.enableDepthTest();
+            RenderSystem.disableBlend();
+
+            MatrixStack stack = new MatrixStack();
+            for (int i = 0, n = blocks.size(); i < n; i++)
+            {
+                BlockShadowEntry entry = blocks.get(i);
+                if (entry == null || !entry.cutout)
+                {
+                    continue;
+                }
+                BlockPos p = entry.pos;
+                BlockState state = world.getBlockState(p);
+                if (state.isAir())
+                {
+                    continue;
+                }
+
+                RenderLayer layer;
+                try
+                {
+                    layer = RenderLayers.getBlockLayer(state);
+                }
+                catch (Throwable t)
+                {
+                    continue;
+                }
+                if (layer != RenderLayer.getCutout() && layer != RenderLayer.getCutoutMipped())
+                {
+                    continue;
+                }
+
+                VertexConsumer consumer = immediate.getBuffer(layer);
+                stack.push();
+                stack.translate(p.getX(), p.getY(), p.getZ());
+                cutoutRandom.setSeed(state.getRenderingSeed(p));
+                try
+                {
+                    brm.renderBlock(state, p, world, stack, consumer, true, cutoutRandom);
+                }
+                catch (Throwable t)
+                {
+                    // skip a single broken block, keep baking the rest
+                }
+                stack.pop();
+            }
+            immediate.draw();
+        }
+        catch (Throwable t)
+        {
+            if (!blockRenderErrorLogged)
+            {
+                blockRenderErrorLogged = true;
+                System.err.println("[irlite] renderBlocksDepthCutout failed: " + t);
+                t.printStackTrace();
+            }
+        }
+        finally
+        {
+            ShadowBakeState.setBaking(false);
+        }
+    }
+
+    /**
+     * Reusable forEachBox consumer that emits one block-aligned VoxelShape AABB
+     * as 6 world-space quads. The block origin (ox, oy, oz) is mutated per
+     * block; the shape's box coords are local (0..1). Winding is irrelevant —
+     * culling is disabled, so both faces of each quad write depth.
+     */
+    private static final class QuadBoxConsumer implements net.minecraft.util.shape.VoxelShapes.BoxConsumer
+    {
+        final BufferBuilder buf;
+        int ox, oy, oz;
+
+        QuadBoxConsumer(BufferBuilder buf)
+        {
+            this.buf = buf;
+        }
+
+        @Override
+        public void consume(double minX, double minY, double minZ,
+                            double maxX, double maxY, double maxZ)
+        {
+            float x1 = (float) (ox + minX);
+            float y1 = (float) (oy + minY);
+            float z1 = (float) (oz + minZ);
+            float x2 = (float) (ox + maxX);
+            float y2 = (float) (oy + maxY);
+            float z2 = (float) (oz + maxZ);
+
+            // -X
+            buf.vertex(x1, y1, z1).next();
+            buf.vertex(x1, y1, z2).next();
+            buf.vertex(x1, y2, z2).next();
+            buf.vertex(x1, y2, z1).next();
+            // +X
+            buf.vertex(x2, y1, z2).next();
+            buf.vertex(x2, y1, z1).next();
+            buf.vertex(x2, y2, z1).next();
+            buf.vertex(x2, y2, z2).next();
+            // -Y
+            buf.vertex(x1, y1, z2).next();
+            buf.vertex(x1, y1, z1).next();
+            buf.vertex(x2, y1, z1).next();
+            buf.vertex(x2, y1, z2).next();
+            // +Y
+            buf.vertex(x1, y2, z1).next();
+            buf.vertex(x1, y2, z2).next();
+            buf.vertex(x2, y2, z2).next();
+            buf.vertex(x2, y2, z1).next();
+            // -Z
+            buf.vertex(x2, y1, z1).next();
+            buf.vertex(x1, y1, z1).next();
+            buf.vertex(x1, y2, z1).next();
+            buf.vertex(x2, y2, z1).next();
+            // +Z
+            buf.vertex(x1, y1, z2).next();
+            buf.vertex(x2, y1, z2).next();
+            buf.vertex(x2, y2, z2).next();
+            buf.vertex(x1, y2, z2).next();
+        }
     }
 
     public static void endPass()

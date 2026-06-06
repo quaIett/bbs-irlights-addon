@@ -25,6 +25,7 @@ public class BBSSettingsMixin
             IKey.constant("ULTRA")
         );
         IrliteConfig.shadowCache = builder.getBoolean("shadow_cache", true);
+        IrliteConfig.shadowBlocks = builder.getBoolean("shadow_blocks", true);
 
         // Separate section for the shader patcher (UI injected by
         // UISettingsOverlayPanelMixin). Empty category — buildSections still

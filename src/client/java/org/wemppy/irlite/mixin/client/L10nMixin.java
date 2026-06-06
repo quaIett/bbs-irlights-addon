@@ -28,5 +28,8 @@ public class L10nMixin
 
         self.getKey("bbs.config.irlite.shadow_cache", "Cache static shadows");
         self.getKey("bbs.config.irlite.shadow_cache-comment", "Only re-bake shadow maps when lights or occluders move. Big FPS win for static/paused scenes. Turn off if shadows ever look stale.");
+
+        self.getKey("bbs.config.irlite.shadow_blocks", "Block shadows");
+        self.getKey("bbs.config.irlite.shadow_blocks-comment", "Cast shadows from world blocks: partial blocks (slabs, stairs, fences) by their real shape, and cutout blocks (leaves, bars, glass doors) without shadowing transparent texels. Heavier until the per-light cache lands.");
     }
 }

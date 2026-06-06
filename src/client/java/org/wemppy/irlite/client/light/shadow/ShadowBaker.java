@@ -1,6 +1,7 @@
 package org.wemppy.irlite.client.light.shadow;
 
 import io.netty.util.collection.IntObjectMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.blocks.entities.ModelProperties;
@@ -30,6 +31,7 @@ import org.wemppy.irlite.client.light.LightRegistry;
 import org.wemppy.irlite.mixin.client.bbs.FilmsAccessor;
 import org.wemppy.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -49,6 +51,12 @@ public final class ShadowBaker
     private static final double COLLECT_DIST_SQ = COLLECT_DIST * COLLECT_DIST;
     private static final float OVERLAP_MARGIN = 0.5f;
 
+    /** Block-shadow collection radius cap. Blocks farther than this from a
+     *  light cast no shadow (the bake far-plane may still be larger). Bounds
+     *  the per-light bbox walk; Stage A has no cache, so this directly bounds
+     *  the per-frame cost. */
+    private static final float MAX_BLOCK_COLLECT_RADIUS = 24f;
+
     private static final Object[] occ = new Object[MAX_OCCLUDERS];
     private static final int[] occType = new int[MAX_OCCLUDERS];
     private static final float[] ox = new float[MAX_OCCLUDERS];
@@ -61,6 +69,10 @@ public final class ShadowBaker
      *  reuse the depth maps from the previous frame (tiles are still assigned). */
     private static double lastHash = Double.NaN;
 
+    /** Reusable scratch set of the current frame's light ids, used to evict the
+     *  block-list + VBO caches for lights that disappeared. */
+    private static final LongOpenHashSet liveIds = new LongOpenHashSet();
+
     private ShadowBaker()
     {}
 
@@ -72,6 +84,11 @@ public final class ShadowBaker
         }
         if (LightRegistry.getCount() == 0)
         {
+            // No lights — drain block caches so their VBOs don't linger in VRAM
+            // after walking away from every lamp. Both retains no-op once empty.
+            liveIds.clear();
+            BlockShadowCache.retainOnly(liveIds);
+            ShadowRenderer.retainBlockVbos(liveIds);
             return;
         }
 
@@ -79,17 +96,18 @@ public final class ShadowBaker
         IRLShadowQuality.applyFromSetting(IrliteConfig.shadowQuality());
 
         collect(world, cameraPos, tickDelta);
-        if (occCount == 0)
-        {
-            return;
-        }
+        // NOTE: no early-out on occCount == 0 — a light shining only on world
+        // blocks (no entity/model/replay occluders nearby) still needs its
+        // block silhouette baked. The per-light skip below also checks blocks.
 
         int n = LightRegistry.getCount();
 
         // Scene cache: if neither lights nor occluders moved since the last
         // bake, skip the (expensive) GL depth render and reuse the existing
         // depth maps. Tiles/slots are still assigned so the shader keeps
-        // reading the same valid maps.
+        // reading the same valid maps. Block edits don't move anything, so
+        // sceneHash can't see them — WorldBlockChangeMixin forces a rebake via
+        // markBlocksDirty() (lastHash = NaN) instead.
         double hash = sceneHash(n);
         boolean dirty = !IrliteConfig.shadowCache() || Double.isNaN(lastHash) || hash != lastHash;
         lastHash = hash;
@@ -107,8 +125,22 @@ public final class ShadowBaker
             float ly = LightRegistry.getY(i);
             float lz = LightRegistry.getZ(i);
             float range = LightRegistry.getRange(i);
+            if (range < 1e-3f)
+            {
+                continue;
+            }
             boolean noEnt = LightRegistry.getNoEntityShadows(i);
-            if (range < 1e-3f || countInRange(lx, ly, lz, range, noEnt) == 0)
+
+            long id = LightRegistry.getId(i);
+            int entInRange = countInRange(lx, ly, lz, range, noEnt);
+            // Collect blocks every frame (NOT gated on dirty): the skip/tile
+            // decision must match the frame that actually baked, or the atlas
+            // tile a light points to in the SSBO could drift off its baked
+            // depth map. On a real cache-hit nothing moved and no block changed
+            // (invalidateAt forces it), so the result is identical. Blocks are
+            // NOT gated by noEntityShadows. Cached by id -> O(1) on a hit.
+            List<BlockShadowEntry> blocks = collectBlocks(id, world, lx, ly, lz, range);
+            if (entInRange == 0 && blocks.isEmpty())
             {
                 continue;
             }
@@ -121,7 +153,14 @@ public final class ShadowBaker
             if (dirty)
             {
                 ShadowRenderer.beginSpot(tile, lx, ly, lz, dx, dy, dz, range, outerDeg);
-                renderInRange(lx, ly, lz, range, noEnt, tickDelta);
+                if (entInRange > 0)
+                {
+                    renderInRange(lx, ly, lz, range, noEnt, tickDelta);
+                }
+                if (!blocks.isEmpty())
+                {
+                    ShadowRenderer.renderBlocksDepth(id, blocks);
+                }
                 ShadowRenderer.endPass();
             }
 
@@ -142,8 +181,17 @@ public final class ShadowBaker
             float ly = LightRegistry.getY(i);
             float lz = LightRegistry.getZ(i);
             float radius = LightRegistry.getRange(i);
+            if (radius < 1e-3f)
+            {
+                continue;
+            }
             boolean noEnt = LightRegistry.getNoEntityShadows(i);
-            if (radius < 1e-3f || countInRange(lx, ly, lz, radius, noEnt) == 0)
+
+            long id = LightRegistry.getId(i);
+            int entInRange = countInRange(lx, ly, lz, radius, noEnt);
+            // Collected once, reused across all 6 cube faces (see spot note).
+            List<BlockShadowEntry> blocks = collectBlocks(id, world, lx, ly, lz, radius);
+            if (entInRange == 0 && blocks.isEmpty())
             {
                 continue;
             }
@@ -153,7 +201,14 @@ public final class ShadowBaker
                 for (int face = 0; face < 6; face++)
                 {
                     ShadowRenderer.beginPointFace(layer, face, lx, ly, lz, radius);
-                    renderInRange(lx, ly, lz, radius, noEnt, tickDelta);
+                    if (entInRange > 0)
+                    {
+                        renderInRange(lx, ly, lz, radius, noEnt, tickDelta);
+                    }
+                    if (!blocks.isEmpty())
+                    {
+                        ShadowRenderer.renderBlocksDepth(id, blocks);
+                    }
                     ShadowRenderer.endPass();
                 }
             }
@@ -161,6 +216,44 @@ public final class ShadowBaker
             LightRegistry.setShadowTile(i, layer);
             layer++;
         }
+
+        // Evict block-list + VBO caches for lights no longer present. liveIds
+        // stays empty when the feature is off, so both caches drain then.
+        liveIds.clear();
+        if (IrliteConfig.shadowBlocks())
+        {
+            for (int i = 0; i < n; i++)
+            {
+                liveIds.add(LightRegistry.getId(i));
+            }
+        }
+        BlockShadowCache.retainOnly(liveIds);
+        ShadowRenderer.retainBlockVbos(liveIds);
+    }
+
+    /** Force the next bake to be dirty (full rebake). Called from
+     *  {@link org.wemppy.irlite.mixin.client.WorldBlockChangeMixin} when a block
+     *  change actually hit a cached light. Needed because sceneHash is
+     *  position-only and can't see a block edit — without it the global cache
+     *  would reuse stale depth maps. BlockShadowCache.invalidateAt makes the CPU
+     *  re-collection precise; this still triggers a global GL re-render
+     *  (acceptable: block edits are infrequent). */
+    public static void markBlocksDirty()
+    {
+        lastHash = Double.NaN;
+    }
+
+    /** Block occluders around a light, clamped to {@link #MAX_BLOCK_COLLECT_RADIUS}.
+     *  Empty when the feature is off. Backed by the identity-keyed
+     *  {@link BlockShadowCache} (O(1) on a hit; recollects on light-move or a
+     *  block change in range). */
+    private static List<BlockShadowEntry> collectBlocks(long id, ClientWorld world, float lx, float ly, float lz, float range)
+    {
+        if (!IrliteConfig.shadowBlocks() || world == null)
+        {
+            return Collections.emptyList();
+        }
+        return BlockShadowCache.getOrCompute(id, world, lx, ly, lz, Math.min(range, MAX_BLOCK_COLLECT_RADIUS));
     }
 
     /** Additive position hash over all lights + occluders. Any movement (even

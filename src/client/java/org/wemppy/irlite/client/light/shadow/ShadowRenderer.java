@@ -506,11 +506,33 @@ public final class ShadowRenderer
         VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
 
         ShadowBakeState.setBaking(true);
+        MatrixStack mv = RenderSystem.getModelViewStack();
+        boolean mvPushed = false;
         try
         {
             RenderSystem.depthMask(true);
             RenderSystem.enableDepthTest();
             RenderSystem.disableBlend();
+
+            // Establish the LIGHT's own view/proj BEFORE the collection loop, not
+            // just before the final immediate.draw(). Cutout blocks of different
+            // RenderLayers (a door/trapdoor on CUTOUT; leaves/glass/bars on
+            // CUTOUT_MIPPED) all share the Immediate's fallback BufferBuilder, so
+            // requesting a buffer for a NEW layer auto-flushes the PREVIOUS layer
+            // mid-loop. That flush reads RenderSystem's live matrices — which a
+            // vanilla-mob caster baked earlier in this pass leaves corrupted — so
+            // with the matrices fixed only after the loop, every cutout layer but
+            // the last drew into nowhere and its shadows vanished the moment a
+            // second cutout layer was present (one layer alone always worked, hence
+            // "remove the trapdoor and the leaf/glass shadows come back"). Setting
+            // them first makes both the mid-loop auto-flushes and the final draw
+            // land in the depth map. mvPushed + the finally keep the stack balanced.
+            mv.push();
+            mvPushed = true;
+            mv.loadIdentity();
+            mv.multiplyPositionMatrix(currentView);
+            RenderSystem.applyModelViewMatrix();
+            RenderSystem.setProjectionMatrix(currentProj, VertexSorter.BY_DISTANCE);
 
             MatrixStack stack = new MatrixStack();
             for (int i = 0, n = blocks.size(); i < n; i++)
@@ -555,26 +577,11 @@ public final class ShadowRenderer
                 }
                 stack.pop();
             }
-            // immediate.draw() flushes through vanilla's cutout shader, which reads
-            // RenderSystem's CACHED modelview/projection — matrices we can't hand in
-            // directly the way the opaque VBO path does. A caster baked earlier in
-            // this pass (notably a model block whose form is a vanilla mob, drawn via
-            // the vanilla EntityRenderer) leaves that cached modelview corrupted, so
-            // the cutout batch would transform wrong and land nothing in the depth
-            // map — glass/leaf/grate ("transparent-pixel") block shadows silently
-            // vanish even though opaque blocks now bake (B1 fixed only the opaque
-            // path). Re-establish the LIGHT's own view/proj (the same currentView/
-            // currentProj the opaque draw uses) around the flush; the push/pop keeps
-            // the begin/endPass modelview-stack balance intact.
-            MatrixStack mv = RenderSystem.getModelViewStack();
-            mv.push();
-            mv.loadIdentity();
-            mv.multiplyPositionMatrix(currentView);
-            RenderSystem.applyModelViewMatrix();
-            RenderSystem.setProjectionMatrix(currentProj, VertexSorter.BY_DISTANCE);
+            // Flush the final layer. The mid-loop auto-flushes (on each layer
+            // switch, see the note above) and this one all run with the light's
+            // matrices that were set before the loop, so every cutout layer lands
+            // in the depth map regardless of what a caster left on RenderSystem.
             immediate.draw();
-            mv.pop();
-            RenderSystem.applyModelViewMatrix();
         }
         catch (Throwable t)
         {
@@ -587,6 +594,11 @@ public final class ShadowRenderer
         }
         finally
         {
+            if (mvPushed)
+            {
+                mv.pop();
+                RenderSystem.applyModelViewMatrix();
+            }
             ShadowBakeState.setBaking(false);
         }
     }

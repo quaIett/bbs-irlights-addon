@@ -31,5 +31,8 @@ public class L10nMixin
 
         self.getKey("bbs.config.irlite.shadow_blocks", "Block shadows");
         self.getKey("bbs.config.irlite.shadow_blocks-comment", "Cast shadows from world blocks: partial blocks (slabs, stairs, fences) by their real shape, and cutout blocks (leaves, bars, glass doors) without shadowing transparent texels. Heavier until the per-light cache lands.");
+
+        self.getKey("bbs.config.irlite.shadow_block_radius", "Block shadow radius");
+        self.getKey("bbs.config.irlite.shadow_block_radius-comment", "How far (in blocks) world blocks are collected as shadow casters around a light. Blocks beyond this cast no shadow even if the light reaches farther. Raise it for large lights; higher values make each re-collection (when a light moves or a nearby block changes) more expensive. Default 24.");
     }
 }

@@ -57,12 +57,6 @@ public final class ShadowBaker
     private static final double COLLECT_DIST_SQ = COLLECT_DIST * COLLECT_DIST;
     private static final float OVERLAP_MARGIN = 0.5f;
 
-    /** Block-shadow collection radius cap. Blocks farther than this from a
-     *  light cast no shadow (the bake far-plane may still be larger). Bounds
-     *  the per-light bbox walk; Stage A has no cache, so this directly bounds
-     *  the per-frame cost. */
-    private static final float MAX_BLOCK_COLLECT_RADIUS = 24f;
-
     private static final long FNV_OFFSET = 1469598103934665603L;
     private static final long FNV_PRIME = 1099511628211L;
 
@@ -383,17 +377,18 @@ public final class ShadowBaker
         }
     }
 
-    /** Block occluders around a light, clamped to {@link #MAX_BLOCK_COLLECT_RADIUS}.
-     *  Empty when the feature is off. Backed by the identity-keyed
-     *  {@link BlockShadowCache} (O(1) on a hit; recollects on light-move or a
-     *  block change in range). */
+    /** Block occluders around a light, clamped to the configurable
+     *  {@link IrliteConfig#shadowBlockRadius()} (default 24). Empty when the
+     *  feature is off. Backed by the identity-keyed {@link BlockShadowCache}
+     *  (O(1) on a hit; recollects on light-move, radius change, or a block change
+     *  in range). */
     private static List<BlockShadowEntry> collectBlocks(long id, ClientWorld world, float lx, float ly, float lz, float range)
     {
         if (!IrliteConfig.shadowBlocks() || world == null)
         {
             return Collections.emptyList();
         }
-        return BlockShadowCache.getOrCompute(id, world, lx, ly, lz, Math.min(range, MAX_BLOCK_COLLECT_RADIUS));
+        return BlockShadowCache.getOrCompute(id, world, lx, ly, lz, Math.min(range, (float) IrliteConfig.shadowBlockRadius()));
     }
 
     /** FNV-1a fold of one float (raw bits) into a running hash. */

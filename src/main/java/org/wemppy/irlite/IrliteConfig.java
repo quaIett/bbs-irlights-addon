@@ -9,6 +9,7 @@ public final class IrliteConfig
     public static ValueInt shadowQuality;
     public static ValueBoolean shadowCache;
     public static ValueBoolean shadowBlocks;
+    public static ValueInt shadowBlockRadius;
 
     private IrliteConfig()
     {}
@@ -35,5 +36,14 @@ public final class IrliteConfig
     public static int shadowQuality()
     {
         return shadowQuality != null ? shadowQuality.get() : 1;
+    }
+
+    /** Block-shadow collection radius in blocks (default 24). World blocks farther
+     *  than this from a light cast no shadow even when the light's range is larger
+     *  — it bounds the per-light bbox walk. Higher = bigger lights shadow correctly
+     *  but each re-collection (light move / nearby block edit) costs more. */
+    public static int shadowBlockRadius()
+    {
+        return shadowBlockRadius != null ? shadowBlockRadius.get() : 24;
     }
 }

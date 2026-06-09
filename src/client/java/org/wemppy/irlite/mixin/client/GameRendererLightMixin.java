@@ -24,6 +24,8 @@ public class GameRendererLightMixin
         ClientWorld world = mc.world;
         Camera camera = mc.gameRenderer.getCamera();
         Vec3d cameraPos = camera != null ? camera.getPos() : Vec3d.ZERO;
+        // Forward look vector for the shadow baker's behind-camera light cull.
+        Vec3d cameraForward = camera != null ? Vec3d.fromPolar(camera.getPitch(), camera.getYaw()) : null;
 
         // Render-path registrations (live actors / replays) accumulated during the
         // PREVIOUS frame's world render are still in the registry; the scanner adds
@@ -37,7 +39,7 @@ public class GameRendererLightMixin
         {
             mc.getEntityRenderDispatcher().configure(world, camera, mc.getCameraEntity());
         }
-        ShadowBaker.bake(world, cameraPos, tickDelta);
+        ShadowBaker.bake(world, cameraPos, cameraForward, tickDelta);
 
         LightRegistry.flush();
     }

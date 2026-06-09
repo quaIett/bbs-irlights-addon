@@ -63,6 +63,11 @@ public final class ShadowRenderer
     private static final int FULL_LIGHT = LightmapTextureManager.pack(15, 15);
 
     private static boolean inPass = false;
+    /** True once {@link #savePassState} has snapshotted the original GL state
+     *  this bake. {@link #beginBake} clears it so the next bake re-grabs the
+     *  (possibly different) state, while passes within one bake share the
+     *  single snapshot instead of re-running the glGet* sync points. */
+    private static boolean passStateSaved = false;
 
     private static int savedFbo;
     private static final int[] savedViewport = new int[4];
@@ -80,6 +85,15 @@ public final class ShadowRenderer
 
     private ShadowRenderer()
     {}
+
+    /** Call once at the start of a bake, before any begin*()/endPass(). Arms a
+     *  fresh snapshot of the MC/Iris GL state on the first pass of this bake
+     *  (see {@link #savePassState}), so the per-pass glGet* stalls collapse to
+     *  one per bake. */
+    public static void beginBake()
+    {
+        passStateSaved = false;
+    }
 
     public static void beginSpot(int tile,
                                  float lpx, float lpy, float lpz,
@@ -693,6 +707,17 @@ public final class ShadowRenderer
 
     private static void savePassState()
     {
+        // The saved state is the original MC/Iris GL state, which every endPass
+        // restores — so it is invariant across all passes of one bake. Snapshot
+        // it only on the first pass (the glGet* are CPU<->GPU sync points; up to
+        // 16 spots + 16*6 point faces = ~112 passes would otherwise issue ~5
+        // each). beginBake() re-arms it for the next bake.
+        inPass = true;
+        if (passStateSaved)
+        {
+            return;
+        }
+
         savedFbo = GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
         GL11.glGetIntegerv(GL11.GL_VIEWPORT, savedViewport);
         savedScissorEnabled = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
@@ -713,7 +738,7 @@ public final class ShadowRenderer
             savedMaskA = maskBuf.get(3) != 0;
         }
 
-        inPass = true;
+        passStateSaved = true;
     }
 
     private static void applyMatrices(Matrix4f proj)

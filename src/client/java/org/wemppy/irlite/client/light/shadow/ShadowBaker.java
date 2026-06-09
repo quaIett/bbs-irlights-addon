@@ -117,7 +117,7 @@ public final class ShadowBaker
     private ShadowBaker()
     {}
 
-    public static void bake(ClientWorld world, Vec3d cameraPos, float tickDelta)
+    public static void bake(ClientWorld world, Vec3d cameraPos, Vec3d cameraForward, float tickDelta)
     {
         if (world == null || cameraPos == null)
         {
@@ -147,6 +147,19 @@ public final class ShadowBaker
         int n = LightRegistry.getCount();
         boolean cache = IrliteConfig.shadowCache();
         bakedIds.clear();
+        ShadowRenderer.beginBake();
+
+        // Behind-camera cull inputs: a light whose whole influence sphere is
+        // behind the camera plane lights no on-screen surface (diffuse/specular
+        // only sample its shadow map for in-range fragments, and volumetrics
+        // ignore the map), so its bake is skipped entirely (the per-light test
+        // in each loop below). Conservative: only the fully-behind half-space is
+        // culled, never a side-of-frustum light, so no shadow can go missing.
+        double camX = cameraPos.x, camY = cameraPos.y, camZ = cameraPos.z;
+        boolean haveFwd = cameraForward != null;
+        double fwdX = haveFwd ? cameraForward.x : 0.0;
+        double fwdY = haveFwd ? cameraForward.y : 0.0;
+        double fwdZ = haveFwd ? cameraForward.z : 0.0;
 
         // --- spotlights: one perspective atlas tile each ---
         int tile = 0;
@@ -162,6 +175,13 @@ public final class ShadowBaker
             float lz = LightRegistry.getZ(i);
             float range = LightRegistry.getRange(i);
             if (range < 1e-3f)
+            {
+                continue;
+            }
+            // Whole sphere behind the camera -> skip (re-bakes on first sight
+            // when the camera turns back; its tile stays -1 = unshadowed while
+            // off, which is never sampled).
+            if (haveFwd && (lx - camX) * fwdX + (ly - camY) * fwdY + (lz - camZ) * fwdZ < -range)
             {
                 continue;
             }
@@ -244,6 +264,11 @@ public final class ShadowBaker
             float lz = LightRegistry.getZ(i);
             float radius = LightRegistry.getRange(i);
             if (radius < 1e-3f)
+            {
+                continue;
+            }
+            // Behind-camera cull (see the spot loop).
+            if (haveFwd && (lx - camX) * fwdX + (ly - camY) * fwdY + (lz - camZ) * fwdZ < -radius)
             {
                 continue;
             }

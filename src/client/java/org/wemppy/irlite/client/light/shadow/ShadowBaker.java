@@ -129,17 +129,21 @@ public final class ShadowBaker
             {
                 continue;
             }
-            boolean noEnt = LightRegistry.getNoEntityShadows(i);
+            boolean castsShadows = LightRegistry.getShadows(i);
 
             long id = LightRegistry.getId(i);
-            int entInRange = countInRange(lx, ly, lz, range, noEnt);
+            // "Shadows" toggle (default on): when off this light casts no shadow
+            // at all — neither entities nor world blocks. Forcing both inputs
+            // empty drops it into the same "nothing in range" skip below, leaving
+            // its shadow tile unassigned (-1 = none in the SSBO -> unshadowed).
+            int entInRange = castsShadows ? countInRange(lx, ly, lz, range) : 0;
             // Collect blocks every frame (NOT gated on dirty): the skip/tile
             // decision must match the frame that actually baked, or the atlas
             // tile a light points to in the SSBO could drift off its baked
             // depth map. On a real cache-hit nothing moved and no block changed
-            // (invalidateAt forces it), so the result is identical. Blocks are
-            // NOT gated by noEntityShadows. Cached by id -> O(1) on a hit.
-            List<BlockShadowEntry> blocks = collectBlocks(id, world, lx, ly, lz, range);
+            // (invalidateAt forces it), so the result is identical. Cached by
+            // id -> O(1) on a hit.
+            List<BlockShadowEntry> blocks = castsShadows ? collectBlocks(id, world, lx, ly, lz, range) : Collections.emptyList();
             if (entInRange == 0 && blocks.isEmpty())
             {
                 continue;
@@ -155,7 +159,7 @@ public final class ShadowBaker
                 ShadowRenderer.beginSpot(tile, lx, ly, lz, dx, dy, dz, range, outerDeg);
                 if (entInRange > 0)
                 {
-                    renderInRange(lx, ly, lz, range, noEnt, tickDelta);
+                    renderInRange(lx, ly, lz, range, tickDelta);
                 }
                 if (!blocks.isEmpty())
                 {
@@ -185,12 +189,13 @@ public final class ShadowBaker
             {
                 continue;
             }
-            boolean noEnt = LightRegistry.getNoEntityShadows(i);
+            boolean castsShadows = LightRegistry.getShadows(i);
 
             long id = LightRegistry.getId(i);
-            int entInRange = countInRange(lx, ly, lz, radius, noEnt);
+            // See the spot loop: "Shadows" off -> no entities, no blocks.
+            int entInRange = castsShadows ? countInRange(lx, ly, lz, radius) : 0;
             // Collected once, reused across all 6 cube faces (see spot note).
-            List<BlockShadowEntry> blocks = collectBlocks(id, world, lx, ly, lz, radius);
+            List<BlockShadowEntry> blocks = castsShadows ? collectBlocks(id, world, lx, ly, lz, radius) : Collections.emptyList();
             if (entInRange == 0 && blocks.isEmpty())
             {
                 continue;
@@ -203,7 +208,7 @@ public final class ShadowBaker
                     ShadowRenderer.beginPointFace(layer, face, lx, ly, lz, radius);
                     if (entInRange > 0)
                     {
-                        renderInRange(lx, ly, lz, radius, noEnt, tickDelta);
+                        renderInRange(lx, ly, lz, radius, tickDelta);
                     }
                     if (!blocks.isEmpty())
                     {
@@ -265,7 +270,7 @@ public final class ShadowBaker
         {
             h += LightRegistry.getX(i) + LightRegistry.getY(i) * 7.0 + LightRegistry.getZ(i) * 13.0
                 + LightRegistry.getDirX(i) * 17.0 + LightRegistry.getDirY(i) * 19.0 + LightRegistry.getDirZ(i) * 23.0
-                + LightRegistry.getRange(i) * 29.0 + i * 0.123;
+                + LightRegistry.getRange(i) * 29.0 + (LightRegistry.getShadows(i) ? 31.0 : 0.0) + i * 0.123;
         }
         for (int k = 0; k < occCount; k++)
         {
@@ -274,20 +279,11 @@ public final class ShadowBaker
         return h;
     }
 
-    private static boolean skip(int k, boolean skipEntities)
-    {
-        return skipEntities && (occType[k] == ShadowRenderer.CASTER_ENTITY || occType[k] == ShadowRenderer.CASTER_REPLAY);
-    }
-
-    private static int countInRange(float lx, float ly, float lz, float reachBase, boolean skipEntities)
+    private static int countInRange(float lx, float ly, float lz, float reachBase)
     {
         int c = 0;
         for (int k = 0; k < occCount; k++)
         {
-            if (skip(k, skipEntities))
-            {
-                continue;
-            }
             float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
             float reach = reachBase + orad[k];
             if (ddx * ddx + ddy * ddy + ddz * ddz <= reach * reach)
@@ -298,14 +294,10 @@ public final class ShadowBaker
         return c;
     }
 
-    private static void renderInRange(float lx, float ly, float lz, float reachBase, boolean skipEntities, float tickDelta)
+    private static void renderInRange(float lx, float ly, float lz, float reachBase, float tickDelta)
     {
         for (int k = 0; k < occCount; k++)
         {
-            if (skip(k, skipEntities))
-            {
-                continue;
-            }
             float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
             float reach = reachBase + orad[k];
             if (ddx * ddx + ddy * ddy + ddz * ddz <= reach * reach)

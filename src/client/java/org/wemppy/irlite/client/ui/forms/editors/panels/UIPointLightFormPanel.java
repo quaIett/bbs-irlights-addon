@@ -20,7 +20,7 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
     public UITrackpad vlDensity;
     public UITrackpad bulbSize;
     public UIToggle entitiesOnly;
-    public UIToggle noEntityShadows;
+    public UIToggle shadows;
 
     public UIPointLightFormPanel(UIForm editor)
     {
@@ -34,7 +34,7 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.vlDensity = new UITrackpad((v) -> this.form.vlDensity.set(v.floatValue())).limit(0.005, 0.5);
         this.bulbSize = new UITrackpad((v) -> this.form.bulbSize.set(v.floatValue())).limit(0, 2);
         this.entitiesOnly = new UIToggle(IKey.constant("Entities only"), (b) -> this.form.entitiesOnly.set(b.getValue()));
-        this.noEntityShadows = new UIToggle(IKey.constant("No entity shadows"), (b) -> this.form.noEntityShadows.set(b.getValue()));
+        this.shadows = new UIToggle(IKey.constant("Shadows"), (b) -> this.form.shadows.set(b.getValue()));
 
         this.options.add(UI.label(IKey.constant("Color")), this.color);
         this.options.add(UI.label(IKey.constant("Intensity")), this.intensity);
@@ -44,7 +44,7 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.options.add(UI.label(IKey.constant("VL density")), this.vlDensity);
         this.options.add(UI.label(IKey.constant("Bulb size (shadow softness)")), this.bulbSize);
         this.options.add(this.entitiesOnly);
-        this.options.add(this.noEntityShadows);
+        this.options.add(this.shadows);
     }
 
     @Override
@@ -60,6 +60,6 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.vlDensity.setValue(form.vlDensity.get());
         this.bulbSize.setValue(form.bulbSize.get());
         this.entitiesOnly.setValue(form.entitiesOnly.get());
-        this.noEntityShadows.setValue(form.noEntityShadows.get());
+        this.shadows.setValue(form.shadows.get());
     }
 }

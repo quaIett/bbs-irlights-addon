@@ -45,7 +45,7 @@ public class PointLightFormRenderer extends AbstractLightFormRenderer<PointLight
             this.form.intensity.get(), this.form.radius.get(),
             this.form.entitiesOnly.get(),
             this.form.anisotropy.get(), this.form.vlDensity.get(), this.form.beamStrength.get(),
-            this.form.bulbSize.get(), this.form.noEntityShadows.get(),
+            this.form.bulbSize.get(), this.form.shadows.get(),
             System.identityHashCode(this.form)
         );
     }

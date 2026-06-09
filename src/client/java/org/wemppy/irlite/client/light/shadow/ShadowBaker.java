@@ -188,11 +188,27 @@ public final class ShadowBaker
             boolean castsShadows = LightRegistry.getShadows(i);
             long id = LightRegistry.getId(i);
 
+            // Spot axis + cone half-angle drive the cone cull in scanInRange /
+            // renderInRangeCone: an occluder fully outside the lit cone can only
+            // shadow unlit fragments, so it need not be baked (and an out-of-cone
+            // subject must not dirty the light). Dir is stored normalized;
+            // re-normalize defensively and disable the cull on a degenerate dir.
+            float dx = LightRegistry.getDirX(i);
+            float dy = LightRegistry.getDirY(i);
+            float dz = LightRegistry.getDirZ(i);
+            float cosOuter = LightRegistry.getCosOuter(i);
+            float coneTheta = (float) Math.acos(MathHelper.clamp(cosOuter, -1f, 1f));
+            float dlen = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+            boolean cone = dlen > 1e-4f;
+            float ndx = cone ? dx / dlen : 0f;
+            float ndy = cone ? dy / dlen : 0f;
+            float ndz = cone ? dz / dlen : 0f;
+
             // "Shadows" toggle (default on): when off this light casts no shadow
             // at all — neither entities nor world blocks. Forcing both inputs
             // empty drops it into the same "nothing in range" skip below, leaving
             // its shadow tile unassigned (-1 = none in the SSBO -> unshadowed).
-            int entInRange = castsShadows ? scanInRange(lx, ly, lz, range) : 0;
+            int entInRange = castsShadows ? scanInRange(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, cone) : 0;
             // Collect blocks every frame (NOT gated on dirty): the skip/tile
             // decision must match the frame that actually baked, or the atlas
             // tile a light points to in the SSBO could drift off its baked
@@ -205,10 +221,6 @@ public final class ShadowBaker
             }
 
             int myTile = tile;
-            float dx = LightRegistry.getDirX(i);
-            float dy = LightRegistry.getDirY(i);
-            float dz = LightRegistry.getDirZ(i);
-            float cosOuter = LightRegistry.getCosOuter(i);
             long sig = lightGeomSig(lx, ly, lz, dx, dy, dz, range, cosOuter, castsShadows) + staticOccSigScratch;
 
             boolean dirty = !cache
@@ -221,11 +233,11 @@ public final class ShadowBaker
 
             if (dirty)
             {
-                float outerDeg = (float) Math.toDegrees(Math.acos(MathHelper.clamp(cosOuter, -1f, 1f)) * 2.0);
+                float outerDeg = (float) Math.toDegrees(coneTheta * 2.0);
                 ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg);
                 if (entInRange > 0)
                 {
-                    renderInRange(lx, ly, lz, range, tickDelta);
+                    renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, tickDelta);
                 }
                 if (!blocks.isEmpty())
                 {
@@ -276,7 +288,9 @@ public final class ShadowBaker
             long id = LightRegistry.getId(i);
 
             // See the spot loop: "Shadows" off -> no entities, no blocks.
-            int entInRange = castsShadows ? scanInRange(lx, ly, lz, radius) : 0;
+            // Points are omnidirectional -> no cone cull (cone=false); the 6 cube
+            // faces are culled individually in renderInRangeFace below.
+            int entInRange = castsShadows ? scanInRange(lx, ly, lz, radius, 0f, 0f, 0f, 0f, false) : 0;
             // Collected once, reused across all 6 cube faces (see spot note).
             List<BlockShadowEntry> blocks = castsShadows ? collectBlocks(id, world, lx, ly, lz, radius) : Collections.emptyList();
             if (entInRange == 0 && blocks.isEmpty())
@@ -302,7 +316,7 @@ public final class ShadowBaker
                     ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius);
                     if (entInRange > 0)
                     {
-                        renderInRange(lx, ly, lz, radius, tickDelta);
+                        renderInRangeFace(lx, ly, lz, radius, face, tickDelta);
                     }
                     if (!blocks.isEmpty())
                     {
@@ -403,8 +417,14 @@ public final class ShadowBaker
     /** Count in-range occluders and, as a side effect, set
      *  {@link #dynamicInRangeScratch} (any entity/replay in range) and
      *  {@link #staticOccSigScratch} (order-independent sum of in-range
-     *  model-block hashes). reach = reachBase + occluderRadius. */
-    private static int scanInRange(float lx, float ly, float lz, float reachBase)
+     *  model-block hashes). reach = reachBase + occluderRadius. When {@code cone}
+     *  is set (spotlights), occluders fully outside the lit cone (unit axis
+     *  dirX/Y/Z, half-angle coneTheta) are skipped: they can only shadow unlit
+     *  fragments, so excluding them both avoids the draw AND stops an out-of-cone
+     *  subject from dirtying the light. Points pass cone=false (omnidirectional;
+     *  the per-face frustum cull is in {@link #renderInRangeFace}). */
+    private static int scanInRange(float lx, float ly, float lz, float reachBase,
+                                   float dirX, float dirY, float dirZ, float coneTheta, boolean cone)
     {
         int c = 0;
         boolean dyn = false;
@@ -413,17 +433,22 @@ public final class ShadowBaker
         {
             float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
             float reach = reachBase + orad[k];
-            if (ddx * ddx + ddy * ddy + ddz * ddz <= reach * reach)
+            if (ddx * ddx + ddy * ddy + ddz * ddz > reach * reach)
             {
-                c++;
-                if (occType[k] == ShadowRenderer.CASTER_MODEL_BLOCK)
-                {
-                    sig += ostatichash[k];
-                }
-                else
-                {
-                    dyn = true; // entity or film replay -> dynamic subject
-                }
+                continue;
+            }
+            if (cone && !insideCone(dirX, dirY, dirZ, coneTheta, ddx, ddy, ddz, orad[k]))
+            {
+                continue;
+            }
+            c++;
+            if (occType[k] == ShadowRenderer.CASTER_MODEL_BLOCK)
+            {
+                sig += ostatichash[k];
+            }
+            else
+            {
+                dyn = true; // entity or film replay -> dynamic subject
             }
         }
         dynamicInRangeScratch = dyn;
@@ -431,17 +456,98 @@ public final class ShadowBaker
         return c;
     }
 
-    private static void renderInRange(float lx, float ly, float lz, float reachBase, float tickDelta)
+    /** Render in-range occluders inside a spot's lit cone (see {@link #insideCone}).
+     *  Must match {@link #scanInRange}'s cone test exactly, so the rendered set
+     *  equals the counted set that gated this bake. */
+    private static void renderInRangeCone(float lx, float ly, float lz, float reachBase,
+                                          float dirX, float dirY, float dirZ, float coneTheta, float tickDelta)
     {
         for (int k = 0; k < occCount; k++)
         {
             float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
             float reach = reachBase + orad[k];
-            if (ddx * ddx + ddy * ddy + ddz * ddz <= reach * reach)
+            if (ddx * ddx + ddy * ddy + ddz * ddz > reach * reach)
             {
-                ShadowRenderer.renderCaster(occ[k], occType[k], tickDelta);
+                continue;
             }
+            if (!insideCone(dirX, dirY, dirZ, coneTheta, ddx, ddy, ddz, orad[k]))
+            {
+                continue;
+            }
+            ShadowRenderer.renderCaster(occ[k], occType[k], tickDelta);
         }
+    }
+
+    /** Render in-range occluders that could intersect ONE point-cube face's 90°
+     *  frustum (face index per {@link ShadowRenderer#beginPointFace}); the other
+     *  five faces never see them, removing ~5/6 of the caster draws per point.
+     *  The face is still cleared even when nothing renders, so a just-vacated
+     *  face shows no stale shadow. */
+    private static void renderInRangeFace(float lx, float ly, float lz, float reachBase, int face, float tickDelta)
+    {
+        for (int k = 0; k < occCount; k++)
+        {
+            float vx = ox[k] - lx, vy = oy[k] - ly, vz = oz[k] - lz;
+            float reach = reachBase + orad[k];
+            if (vx * vx + vy * vy + vz * vz > reach * reach)
+            {
+                continue;
+            }
+            if (!sphereTouchesFace(face, vx, vy, vz, orad[k] * SQRT2))
+            {
+                continue;
+            }
+            ShadowRenderer.renderCaster(occ[k], occType[k], tickDelta);
+        }
+    }
+
+    /** Small angular slack (radians) added to the spot cone test so a subject
+     *  right at the cone edge is never wrongly culled. */
+    private static final float CONE_ANGLE_MARGIN = 0.05f;
+    private static final float SQRT2 = 1.4142135f;
+
+    /** True unless an occluder sphere (offset V = center - lightPos, radius r) is
+     *  ENTIRELY outside the spot's lit cone (unit axis dir, half-angle coneTheta).
+     *  phi = angle of V off the axis; alpha = the sphere's angular radius. If
+     *  phi - alpha > coneTheta the whole sphere sits at a larger axis angle than
+     *  any lit fragment, so it can shadow only unlit fragments and is safe to
+     *  drop. Conservative otherwise (a kept occluder may still be clipped by the
+     *  bake projection). */
+    private static boolean insideCone(float dirX, float dirY, float dirZ, float coneTheta,
+                                      float vx, float vy, float vz, float r)
+    {
+        float d2 = vx * vx + vy * vy + vz * vz;
+        if (d2 <= r * r)
+        {
+            return true; // light sits inside the occluder sphere -> can't cull
+        }
+        float dist = (float) Math.sqrt(d2);
+        float cosPhi = (vx * dirX + vy * dirY + vz * dirZ) / dist; // dir is unit
+        float phi = (float) Math.acos(MathHelper.clamp(cosPhi, -1f, 1f));
+        float alpha = (float) Math.asin(MathHelper.clamp(r / dist, 0f, 1f));
+        return phi - alpha <= coneTheta + CONE_ANGLE_MARGIN;
+    }
+
+    /** Conservative sphere-vs-cube-face-frustum test. The 90° face frustum's four
+     *  side planes pass through the light with inward normals (axis ± tangent);
+     *  the sphere lies outside the frustum iff it is fully beyond one of them.
+     *  {@code k} = sphere radius · √2 (the plane-normal magnitude folded in).
+     *  pd = signed offset along the face axis, a/b = |offset| along the two
+     *  tangents; keep iff pd + k reaches both tangents. */
+    private static boolean sphereTouchesFace(int face, float vx, float vy, float vz, float k)
+    {
+        float pd, a, b;
+        switch (face)
+        {
+            case 0:  pd =  vx; a = Math.abs(vy); b = Math.abs(vz); break; // +X
+            case 1:  pd = -vx; a = Math.abs(vy); b = Math.abs(vz); break; // -X
+            case 2:  pd =  vy; a = Math.abs(vx); b = Math.abs(vz); break; // +Y
+            case 3:  pd = -vy; a = Math.abs(vx); b = Math.abs(vz); break; // -Y
+            case 4:  pd =  vz; a = Math.abs(vx); b = Math.abs(vy); break; // +Z
+            default: pd = -vz; a = Math.abs(vx); b = Math.abs(vy); break; // -Z
+        }
+        float lim = pd + k;
+        return lim >= a && lim >= b;
     }
 
     private static void collect(ClientWorld world, Vec3d cameraPos, float tickDelta)

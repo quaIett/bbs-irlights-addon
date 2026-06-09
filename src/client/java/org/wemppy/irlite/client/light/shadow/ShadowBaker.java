@@ -35,8 +35,10 @@ import org.wemppy.irlite.client.light.LightRegistry;
 import org.wemppy.irlite.mixin.client.bbs.FilmsAccessor;
 import org.wemppy.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Shadow bake driver. Collects nearby occluders (world entities + BBS model
@@ -48,7 +50,10 @@ import java.util.List;
  * blocks, and film replays (all via the BBS FormRenderer / MorphRenderer). A
  * per-light signature cache (see {@link #bake}) skips the GL depth render for
  * any light whose own geometry, in-range static occluders and world blocks are
- * unchanged; a light with a live entity/replay in range always re-bakes.
+ * unchanged; a light with a live entity/replay in range always re-bakes. Atlas
+ * tiles / cube slots are STICKY per light id (see {@link #acquireTile}), so a
+ * light appearing or dropping out does not shift — and thereby re-bake — every
+ * other light's map.
  */
 public final class ShadowBaker
 {
@@ -66,10 +71,11 @@ public final class ShadowBaker
     private static final float[] oy = new float[MAX_OCCLUDERS];
     private static final float[] oz = new float[MAX_OCCLUDERS];
     private static final float[] orad = new float[MAX_OCCLUDERS];
-    /** Per-occluder signature of everything that moves a STATIC (model-block)
-     *  caster's baked silhouette but isn't its center: transform translate/
-     *  scale/rotate. Folded into a light's signature for model blocks in range;
-     *  unused (0) for entity/replay casters, which are always treated dirty. */
+    /** Per-occluder signature of everything that changes a STATIC (model-block)
+     *  caster's baked silhouette but isn't its center: form identity + transform
+     *  translate/scale/rotate. Folded into a light's signature for model blocks
+     *  in range; unused (0) for entity/replay casters, which are always treated
+     *  dirty. */
     private static final long[] ostatichash = new long[MAX_OCCLUDERS];
     private static int occCount;
 
@@ -98,12 +104,51 @@ public final class ShadowBaker
      *  model-block {@link #ostatichash} values. */
     private static long staticOccSigScratch;
 
-    /** Ids that actually baked / were assigned a tile this frame. Drives
-     *  dirty-state eviction: a light that skipped (shadows off, or nothing in
-     *  range) drops its state, so when it next casts it is a first-bake and
-     *  re-renders into its (possibly reused) tile instead of sampling another
-     *  light's depth map. */
-    private static final LongOpenHashSet bakedIds = new LongOpenHashSet();
+    // --- Sticky tile / cube-slot ownership ------------------------------------
+    // A light KEEPS its atlas tile / cube slot across frames — including frames
+    // where it is culled, toggled off, or has nothing in range — so one light
+    // dropping out no longer shifts every later light onto a different tile
+    // (which used to re-bake them all: a camera pan across a light's
+    // behind-plane boundary re-baked the whole scene). A tileless light takes a
+    // free tile first; only when none are free does it steal from the
+    // most-stale owner that hasn't requested for >= STALE_FRAMES frames (so an
+    // owner that merely iterates later in THIS frame is never robbed), and the
+    // victim's dirty state is purged so it cleanly first-bakes if it returns.
+    // A tile's content can only ever be its owner's, so a returning owner with
+    // an unchanged signature safely RE-USES its old depth map — zero rebake.
+    private static final long NO_OWNER = Long.MIN_VALUE;
+    private static final int STALE_FRAMES = 2;
+    private static final long[] spotTileOwner = new long[SpotlightDepthAtlas.MAX_TILES];
+    private static final int[] spotTileActive = new int[SpotlightDepthAtlas.MAX_TILES];
+    private static final long[] pointSlotOwner = new long[PointShadowArray.MAX_SHADOWS];
+    private static final int[] pointSlotActive = new int[PointShadowArray.MAX_SHADOWS];
+    /** Monotonic bake counter driving the staleness test (not wall time). */
+    private static int frameIndex;
+    /** Last seen shadow-quality setting; a change frees + re-allocates the
+     *  depth textures, so every cached map must be forgotten with it. */
+    private static int lastQuality = Integer.MIN_VALUE;
+
+    static
+    {
+        Arrays.fill(spotTileOwner, NO_OWNER);
+        Arrays.fill(pointSlotOwner, NO_OWNER);
+    }
+
+    /** Scratch set of current tile owners for the defensive end-of-frame
+     *  dirty-state sweep (dirty state may outlive a skipped frame — that is
+     *  the sticky-tile win — but never its tile ownership). */
+    private static final LongOpenHashSet ownerIdScratch = new LongOpenHashSet();
+
+    // --- Optional bake profiler: -Dirlite.profileShadows=true -----------------
+    // Logs once per second: avg/max bake() wall time, dirty re-bakes per kind,
+    // occluder/light counts. Baseline + validation tool for the perf work.
+    private static final boolean PROFILE = Boolean.getBoolean("irlite.profileShadows");
+    private static long profWindowStart;
+    private static long profNanos;
+    private static long profMaxNanos;
+    private static int profFrames;
+    private static int profSpotBakes;
+    private static int profPointBakes;
     /** Reusable scratch set of all current light ids, used to evict the block-
      *  list + VBO caches for lights that disappeared. */
     private static final LongOpenHashSet liveIds = new LongOpenHashSet();
@@ -113,25 +158,51 @@ public final class ShadowBaker
 
     public static void bake(ClientWorld world, Vec3d cameraPos, Vec3d cameraForward, float tickDelta)
     {
+        if (!PROFILE)
+        {
+            bakeInner(world, cameraPos, cameraForward, tickDelta);
+            return;
+        }
+
+        long t0 = System.nanoTime();
+        try
+        {
+            bakeInner(world, cameraPos, cameraForward, tickDelta);
+        }
+        finally
+        {
+            profRecordFrame(System.nanoTime() - t0);
+        }
+    }
+
+    private static void bakeInner(ClientWorld world, Vec3d cameraPos, Vec3d cameraForward, float tickDelta)
+    {
         if (world == null || cameraPos == null)
         {
             return;
         }
         if (LightRegistry.getCount() == 0)
         {
-            // No lights — drain every cache so nothing lingers in VRAM/heap
-            // after walking away from all lamps. Empty sets make each retain
-            // a full drain.
-            bakedIds.clear();
-            retainDirtyState(bakedIds);
+            // No lights — forget tiles + dirty state and drain every cache so
+            // nothing lingers in VRAM/heap after walking away from all lamps.
+            resetTileState();
             liveIds.clear();
             BlockShadowCache.retainOnly(liveIds);
             ShadowRenderer.retainBlockVbos(liveIds);
             return;
         }
 
-        // Apply the shadow resolution preset (no-op unless it changed).
-        IRLShadowQuality.applyFromSetting(IrliteConfig.shadowQuality());
+        // Apply the shadow resolution preset (no-op unless it changed). On a
+        // change the depth textures are freed + re-allocated, so every cached
+        // map is gone: forget tiles + dirty state too, or a "clean" light would
+        // skip its rebake and sample a blank (or not yet allocated) map.
+        int quality = IrliteConfig.shadowQuality();
+        IRLShadowQuality.applyFromSetting(quality);
+        if (quality != lastQuality)
+        {
+            resetTileState();
+            lastQuality = quality;
+        }
 
         collect(world, cameraPos, tickDelta);
         // NOTE: no early-out on occCount == 0 — a light shining only on world
@@ -140,7 +211,7 @@ public final class ShadowBaker
 
         int n = LightRegistry.getCount();
         boolean cache = IrliteConfig.shadowCache();
-        bakedIds.clear();
+        frameIndex++;
         ShadowRenderer.beginBake();
 
         // Behind-camera cull inputs: a light whose whole influence sphere is
@@ -156,8 +227,7 @@ public final class ShadowBaker
         double fwdZ = haveFwd ? cameraForward.z : 0.0;
 
         // --- spotlights: one perspective atlas tile each ---
-        int tile = 0;
-        for (int i = 0; i < n && tile < SpotlightDepthAtlas.MAX_TILES; i++)
+        for (int i = 0; i < n; i++)
         {
             if (LightRegistry.getType(i) != 1)
             {
@@ -172,9 +242,10 @@ public final class ShadowBaker
             {
                 continue;
             }
-            // Whole sphere behind the camera -> skip (re-bakes on first sight
-            // when the camera turns back; its tile stays -1 = unshadowed while
-            // off, which is never sampled).
+            // Whole sphere behind the camera -> skip. Its SSBO tile stays -1
+            // (unshadowed, never sampled) while off; the sticky tile it owns is
+            // kept, so when the camera turns back an unchanged light re-uses
+            // its old map without any rebake.
             if (haveFwd && (lx - camX) * fwdX + (ly - camY) * fwdY + (lz - camZ) * fwdZ < -range)
             {
                 continue;
@@ -214,7 +285,11 @@ public final class ShadowBaker
                 continue;
             }
 
-            int myTile = tile;
+            int myTile = acquireTile(spotTileOwner, spotTileActive, id);
+            if (myTile < 0)
+            {
+                continue; // every tile owned by a recently-active light -> unshadowed
+            }
             long sig = lightGeomSig(lx, ly, lz, dx, dy, dz, range, cosOuter, castsShadows) + staticOccSigScratch;
 
             boolean dirty = !cache
@@ -227,6 +302,10 @@ public final class ShadowBaker
 
             if (dirty)
             {
+                if (PROFILE)
+                {
+                    profSpotBakes++;
+                }
                 float outerDeg = (float) Math.toDegrees(coneTheta * 2.0);
                 ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg);
                 if (entInRange > 0)
@@ -244,7 +323,6 @@ public final class ShadowBaker
             lastSig.put(id, sig);
             lastTile.put(id, myTile);
             lastBlocks.put(id, blocks);
-            bakedIds.add(id);
             if (dynamicInRangeScratch)
             {
                 wasDynamic.add(id);
@@ -253,12 +331,10 @@ public final class ShadowBaker
             {
                 wasDynamic.remove(id);
             }
-            tile++;
         }
 
         // --- point lights: cube-array, 6 faces each ---
-        int layer = 0;
-        for (int i = 0; i < n && layer < PointShadowArray.MAX_SHADOWS; i++)
+        for (int i = 0; i < n; i++)
         {
             if (LightRegistry.getType(i) != 0)
             {
@@ -292,7 +368,11 @@ public final class ShadowBaker
                 continue;
             }
 
-            int myLayer = layer;
+            int myLayer = acquireTile(pointSlotOwner, pointSlotActive, id);
+            if (myLayer < 0)
+            {
+                continue; // every slot owned by a recently-active light -> unshadowed
+            }
             long sig = lightGeomSig(lx, ly, lz, 0f, 0f, 0f, radius, 1f, castsShadows) + staticOccSigScratch;
 
             boolean dirty = !cache
@@ -305,6 +385,10 @@ public final class ShadowBaker
 
             if (dirty)
             {
+                if (PROFILE)
+                {
+                    profPointBakes++;
+                }
                 for (int face = 0; face < 6; face++)
                 {
                     ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius);
@@ -324,7 +408,6 @@ public final class ShadowBaker
             lastSig.put(id, sig);
             lastTile.put(id, myLayer);
             lastBlocks.put(id, blocks);
-            bakedIds.add(id);
             if (dynamicInRangeScratch)
             {
                 wasDynamic.add(id);
@@ -333,12 +416,29 @@ public final class ShadowBaker
             {
                 wasDynamic.remove(id);
             }
-            layer++;
         }
 
-        // Evict the per-light dirty state for lights that did NOT bake this
-        // frame (gone, shadows off, or nothing in range) — see bakedIds.
-        retainDirtyState(bakedIds);
+        // Defensive invariant sweep: per-light dirty state may only exist for
+        // current tile owners (steals and resets purge eagerly; this catches
+        // anything they miss). Owners DO keep their state across frames they
+        // skip — that is the sticky-tile win: a light that returns with its
+        // tile and an unchanged signature re-uses its old map, zero rebake.
+        ownerIdScratch.clear();
+        for (int t = 0; t < spotTileOwner.length; t++)
+        {
+            if (spotTileOwner[t] != NO_OWNER)
+            {
+                ownerIdScratch.add(spotTileOwner[t]);
+            }
+        }
+        for (int t = 0; t < pointSlotOwner.length; t++)
+        {
+            if (pointSlotOwner[t] != NO_OWNER)
+            {
+                ownerIdScratch.add(pointSlotOwner[t]);
+            }
+        }
+        retainDirtyState(ownerIdScratch);
 
         // Block-list + VBO caches: keep ALL registered lights so a momentary
         // out-of-range frame doesn't thrash the (expensive) block re-collect.
@@ -353,6 +453,112 @@ public final class ShadowBaker
         }
         BlockShadowCache.retainOnly(liveIds);
         ShadowRenderer.retainBlockVbos(liveIds);
+    }
+
+    /** Sticky allocation: the owner keeps its tile (and is marked active);
+     *  otherwise prefer a free tile; otherwise steal the most-stale tile whose
+     *  owner hasn't requested for {@link #STALE_FRAMES}+ frames — never one
+     *  active this or last frame, so a light that merely iterates later in the
+     *  same frame is not robbed (which would ping-pong tiles between two
+     *  lights, re-baking both every frame). Returns -1 when nothing is
+     *  available; the light then simply casts no shadow this frame. */
+    private static int acquireTile(long[] owner, int[] active, long id)
+    {
+        int free = -1;
+        int stale = -1;
+        int staleAge = Integer.MAX_VALUE;
+        for (int t = 0; t < owner.length; t++)
+        {
+            if (owner[t] == id)
+            {
+                active[t] = frameIndex;
+                return t;
+            }
+            if (owner[t] == NO_OWNER)
+            {
+                if (free < 0)
+                {
+                    free = t;
+                }
+            }
+            else if (frameIndex - active[t] >= STALE_FRAMES && active[t] < staleAge)
+            {
+                stale = t;
+                staleAge = active[t];
+            }
+        }
+
+        int take = free >= 0 ? free : stale;
+        if (take < 0)
+        {
+            return -1;
+        }
+        if (free < 0)
+        {
+            purgeDirtyState(owner[take]); // victim first-bakes if it returns
+        }
+        owner[take] = id;
+        active[take] = frameIndex;
+        return take;
+    }
+
+    /** Drop one light's dirty state so its next bake is a clean first bake
+     *  (used when a tile is stolen — its map content now belongs to another
+     *  light). */
+    private static void purgeDirtyState(long id)
+    {
+        lastSig.remove(id);
+        lastTile.remove(id);
+        lastBlocks.remove(id);
+        wasDynamic.remove(id);
+    }
+
+    /** Forget all tile ownership + per-light dirty state (no lights left, or
+     *  the depth textures were just re-allocated): everything that returns
+     *  first-bakes into a fresh tile. */
+    private static void resetTileState()
+    {
+        Arrays.fill(spotTileOwner, NO_OWNER);
+        Arrays.fill(pointSlotOwner, NO_OWNER);
+        lastSig.clear();
+        lastTile.clear();
+        lastBlocks.clear();
+        wasDynamic.clear();
+    }
+
+    /** Accumulate one frame into the profiler window and log roughly once per
+     *  second (only ever called with -Dirlite.profileShadows=true). */
+    private static void profRecordFrame(long nanos)
+    {
+        profNanos += nanos;
+        if (nanos > profMaxNanos)
+        {
+            profMaxNanos = nanos;
+        }
+        profFrames++;
+
+        long now = System.nanoTime();
+        if (profWindowStart == 0L)
+        {
+            profWindowStart = now;
+            return;
+        }
+        if (now - profWindowStart < 1_000_000_000L)
+        {
+            return;
+        }
+
+        System.out.println(String.format(Locale.ROOT,
+            "[irlite] shadows: bake avg %.2f ms, max %.2f ms | rebakes: %d spot, %d point(x6) | occluders %d, lights %d | %d frames",
+            profNanos / 1e6 / Math.max(profFrames, 1), profMaxNanos / 1e6,
+            profSpotBakes, profPointBakes, occCount, LightRegistry.getCount(), profFrames));
+
+        profWindowStart = now;
+        profNanos = 0L;
+        profMaxNanos = 0L;
+        profFrames = 0;
+        profSpotBakes = 0;
+        profPointBakes = 0;
     }
 
     /** Drop per-light dirty state for ids not in {@code keep}. An empty set
@@ -786,20 +992,25 @@ public final class ShadowBaker
             oy[occCount] = wy;
             oz[occCount] = wz;
             orad[occCount] = rad;
-            // Static signature: center (incl. translate) + scale + rotation. A
-            // model block that only animates its INTERNAL morph pose (transform
-            // unchanged) is treated static and its shadow is cached — same as
-            // the old position-only hash; documented limitation, not a regression.
-            ostatichash[occCount] = modelBlockHash(wx, wy, wz, t);
+            // Static signature: form identity + center (incl. translate) +
+            // scale + rotation. Form identity catches a form swapped in place
+            // (new silhouette, same transform) — sticky tiles retain dirty
+            // state across skipped frames, so the hash must see it. A model
+            // block that only animates its INTERNAL morph pose (same form,
+            // transform unchanged) is still treated static and stays cached —
+            // same as the old position-only hash; documented limitation.
+            ostatichash[occCount] = modelBlockHash(wx, wy, wz, t, System.identityHashCode(form));
             occCount++;
         }
     }
 
-    /** Static-occluder signature for a model block: its baked center plus the
-     *  scale + rotation that the center alone doesn't capture. */
-    private static long modelBlockHash(float wx, float wy, float wz, Transform t)
+    /** Static-occluder signature for a model block: which form it shows plus
+     *  its baked center plus the scale + rotation that the center alone
+     *  doesn't capture. */
+    private static long modelBlockHash(float wx, float wy, float wz, Transform t, int formIdentity)
     {
         long h = FNV_OFFSET;
+        h = (h ^ (formIdentity & 0xffffffffL)) * FNV_PRIME;
         h = mix(h, wx); h = mix(h, wy); h = mix(h, wz);
         if (t != null)
         {

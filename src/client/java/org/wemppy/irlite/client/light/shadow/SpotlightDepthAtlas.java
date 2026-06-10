@@ -5,6 +5,7 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL14;
 import org.lwjgl.opengl.GL30;
+import org.lwjgl.opengl.GL43;
 
 import java.nio.ByteBuffer;
 
@@ -12,6 +13,13 @@ import java.nio.ByteBuffer;
  * 2D depth atlas of perspective shadow maps, one tile per spotlight.
  * GRID_X x GRID_Y grid of TILE_SIZE^2 tiles; tile i = spot slot i at pixel
  * origin ((i%GRID_X)*TILE_SIZE, (i/GRID_X)*TILE_SIZE).
+ *
+ * TWO layers: the LIVE atlas is what the shader samples; the STATIC atlas
+ * holds a light's static-only content (model blocks + world blocks) so that
+ * on frames with a dynamic caster the base can be restored with a GPU copy
+ * ({@link #copyStaticToLive}) instead of re-rendering every static caster.
+ * The static atlas is allocated lazily on the first overlay bake — a scene
+ * with no dynamic casters near lamps never pays its VRAM.
  *
  * Format DEPTH_COMPONENT32F, NEAREST, manual compare in the shader (no
  * fixed-function compare). Lazy alloc: nothing until the first bake.
@@ -26,6 +34,10 @@ public final class SpotlightDepthAtlas
     private static int glTextureId = 0;
     private static int glFboId = 0;
     private static boolean initialized = false;
+
+    private static int staticTextureId = 0;
+    private static int staticFboId = 0;
+    private static boolean staticInitialized = false;
 
     private SpotlightDepthAtlas()
     {}
@@ -46,8 +58,18 @@ public final class SpotlightDepthAtlas
         return glTextureId;
     }
 
-    public static int getFboId()
+    /** FBO of the requested layer (false = live, true = static), allocating it
+     *  on first use. */
+    public static int getFboId(boolean staticLayer)
     {
+        if (staticLayer)
+        {
+            if (!staticInitialized)
+            {
+                initStatic();
+            }
+            return staticFboId;
+        }
         if (!initialized)
         {
             init();
@@ -65,13 +87,53 @@ public final class SpotlightDepthAtlas
         return (tile / GRID_X) * TILE_SIZE;
     }
 
+    /** GPU-copy one tile's depth from the static atlas into the live atlas —
+     *  restores a light's static base before its dynamic casters are drawn on
+     *  top, without re-rendering any static geometry. */
+    public static void copyStaticToLive(int tile)
+    {
+        if (!initialized)
+        {
+            init();
+        }
+        if (!staticInitialized)
+        {
+            initStatic();
+        }
+        int px = tilePixelX(tile);
+        int py = tilePixelY(tile);
+        GL43.glCopyImageSubData(
+            staticTextureId, GL11.GL_TEXTURE_2D, 0, px, py, 0,
+            glTextureId, GL11.GL_TEXTURE_2D, 0, px, py, 0,
+            TILE_SIZE, TILE_SIZE, 1
+        );
+    }
+
     private static void init()
+    {
+        int[] ids = createAtlas();
+        glTextureId = ids[0];
+        glFboId = ids[1];
+        initialized = true;
+    }
+
+    private static void initStatic()
+    {
+        int[] ids = createAtlas();
+        staticTextureId = ids[0];
+        staticFboId = ids[1];
+        staticInitialized = true;
+    }
+
+    /** Allocate one depth atlas texture + FBO, cleared to far plane. Returns
+     *  {textureId, fboId}; restores the GL texture/FBO bindings it touched. */
+    private static int[] createAtlas()
     {
         int prevTex = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
         int prevFbo = GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
 
-        glTextureId = GlStateManager._genTexture();
-        GlStateManager._bindTexture(glTextureId);
+        int textureId = GlStateManager._genTexture();
+        GlStateManager._bindTexture(textureId);
 
         GL11.glTexImage2D(
             GL11.GL_TEXTURE_2D, 0, GL30.GL_DEPTH_COMPONENT32F,
@@ -87,9 +149,9 @@ public final class SpotlightDepthAtlas
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL14.GL_TEXTURE_COMPARE_MODE, GL11.GL_NONE);
 
-        glFboId = GL30.glGenFramebuffers();
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, glFboId);
-        GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, GL11.GL_TEXTURE_2D, glTextureId, 0);
+        int fboId = GL30.glGenFramebuffers();
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, fboId);
+        GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, GL11.GL_TEXTURE_2D, textureId, 0);
         GL11.glDrawBuffer(GL11.GL_NONE);
         GL11.glReadBuffer(GL11.GL_NONE);
 
@@ -109,23 +171,30 @@ public final class SpotlightDepthAtlas
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, prevFbo);
         GlStateManager._bindTexture(prevTex);
 
-        initialized = true;
+        return new int[] { textureId, fboId };
     }
 
     public static void delete()
     {
-        if (!initialized)
+        if (initialized)
         {
-            return;
+            GL11.glDeleteTextures(glTextureId);
+            GL30.glDeleteFramebuffers(glFboId);
+            glTextureId = 0;
+            glFboId = 0;
+            initialized = false;
         }
-        GL11.glDeleteTextures(glTextureId);
-        GL30.glDeleteFramebuffers(glFboId);
-        glTextureId = 0;
-        glFboId = 0;
-        initialized = false;
+        if (staticInitialized)
+        {
+            GL11.glDeleteTextures(staticTextureId);
+            GL30.glDeleteFramebuffers(staticFboId);
+            staticTextureId = 0;
+            staticFboId = 0;
+            staticInitialized = false;
+        }
     }
 
-    /** Switch tile resolution; frees + re-inits the atlas on next access. */
+    /** Switch tile resolution; frees + re-inits both atlases on next access. */
     public static void setTileSize(int newSize)
     {
         if (newSize == TILE_SIZE)

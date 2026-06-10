@@ -95,22 +95,32 @@ public final class ShadowRenderer
         passStateSaved = false;
     }
 
+    /**
+     * Begin a spot depth pass into the live ({@code toStatic} false) or static
+     * ({@code toStatic} true) atlas tile. {@code clear} false keeps the tile's
+     * current depth — used for the dynamic-caster overlay drawn on top of a
+     * static base just restored by {@link SpotlightDepthAtlas#copyStaticToLive}.
+     */
     public static void beginSpot(int tile,
                                  float lpx, float lpy, float lpz,
                                  float ldx, float ldy, float ldz,
-                                 float range, float outerDeg)
+                                 float range, float outerDeg,
+                                 boolean toStatic, boolean clear)
     {
         savePassState();
 
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, SpotlightDepthAtlas.getFboId());
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, SpotlightDepthAtlas.getFboId(toStatic));
         int px = SpotlightDepthAtlas.tilePixelX(tile);
         int py = SpotlightDepthAtlas.tilePixelY(tile);
         int ts = SpotlightDepthAtlas.TILE_SIZE;
         GL11.glViewport(px, py, ts, ts);
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
         GL11.glScissor(px, py, ts, ts);
-        GL11.glClearDepth(1.0);
-        GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
+        if (clear)
+        {
+            GL11.glClearDepth(1.0);
+            GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
+        }
 
         float fovDeg = Math.max(outerDeg, 1.0f);
         float far = Math.max(range, NEAR + 0.1f);
@@ -126,19 +136,29 @@ public final class ShadowRenderer
         applyMatrices(proj);
     }
 
+    /**
+     * Begin a point-cube face depth pass into the live or static array (see
+     * {@link #beginSpot} for the {@code toStatic}/{@code clear} semantics; the
+     * static base of a whole cube is restored by
+     * {@link PointShadowArray#copyStaticToLive}).
+     */
     public static void beginPointFace(int slot, int face,
                                       float lpx, float lpy, float lpz,
-                                      float radius)
+                                      float radius,
+                                      boolean toStatic, boolean clear)
     {
         savePassState();
 
-        PointShadowArray.bindFaceForRender(slot, face);
+        PointShadowArray.bindFaceForRender(slot, face, toStatic);
         int fs = PointShadowArray.FACE_SIZE;
         GL11.glViewport(0, 0, fs, fs);
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
         GL11.glScissor(0, 0, fs, fs);
-        GL11.glClearDepth(1.0);
-        GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
+        if (clear)
+        {
+            GL11.glClearDepth(1.0);
+            GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
+        }
 
         float far = Math.max(radius, NEAR + 0.1f);
         Matrix4f proj = new Matrix4f().perspective((float) Math.toRadians(90.0), 1.0f, NEAR, far);

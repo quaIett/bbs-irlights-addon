@@ -6,12 +6,20 @@ import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL14;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GL40;
+import org.lwjgl.opengl.GL43;
 
 import java.nio.ByteBuffer;
 
 /**
  * Cube-map-array of depth shadow maps, one cubemap (6 faces) per shadowed point
  * light. Face f of shadow slot i lives at array layer i*6 + f.
+ *
+ * TWO layers: the LIVE array is what the shader samples; the STATIC array
+ * holds a light's static-only content (model blocks + world blocks) so that
+ * on frames with a dynamic caster the base can be restored with a single GPU
+ * copy of all 6 faces ({@link #copyStaticToLive}) instead of re-rendering
+ * every static caster into every face. The static array is allocated lazily
+ * on the first overlay bake — no dynamic casters near lamps, no extra VRAM.
  *
  * Each face is a 90-degree perspective depth render from the light position
  * (near 0.05, far = radius). Shader test: sample with the world-space direction
@@ -34,6 +42,10 @@ public final class PointShadowArray
     private static int glFboId = 0;
     private static boolean initialized = false;
 
+    private static int staticTextureId = 0;
+    private static int staticFboId = 0;
+    private static boolean staticInitialized = false;
+
     private PointShadowArray()
     {}
 
@@ -42,25 +54,81 @@ public final class PointShadowArray
         return glTextureId;
     }
 
-    public static void bindFaceForRender(int slot, int face)
+    /** Bind the FBO of the requested layer (false = live, true = static) with
+     *  the given cube face attached, allocating the layer on first use. */
+    public static void bindFaceForRender(int slot, int face, boolean staticLayer)
+    {
+        int fbo;
+        int texture;
+        if (staticLayer)
+        {
+            if (!staticInitialized)
+            {
+                initStatic();
+            }
+            fbo = staticFboId;
+            texture = staticTextureId;
+        }
+        else
+        {
+            if (!initialized)
+            {
+                init();
+            }
+            fbo = glFboId;
+            texture = glTextureId;
+        }
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, fbo);
+        int layer = slot * 6 + face;
+        GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, texture, 0, layer);
+    }
+
+    /** GPU-copy one slot's whole cube (all 6 faces in one call) from the
+     *  static array into the live array — restores a light's static base
+     *  before its dynamic casters are drawn on top. */
+    public static void copyStaticToLive(int slot)
     {
         if (!initialized)
         {
             init();
         }
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, glFboId);
-        int layer = slot * 6 + face;
-        GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, glTextureId, 0, layer);
+        if (!staticInitialized)
+        {
+            initStatic();
+        }
+        GL43.glCopyImageSubData(
+            staticTextureId, GL40.GL_TEXTURE_CUBE_MAP_ARRAY, 0, 0, 0, slot * 6,
+            glTextureId, GL40.GL_TEXTURE_CUBE_MAP_ARRAY, 0, 0, 0, slot * 6,
+            FACE_SIZE, FACE_SIZE, 6
+        );
     }
 
     private static void init()
+    {
+        int[] ids = createArray();
+        glTextureId = ids[0];
+        glFboId = ids[1];
+        initialized = true;
+    }
+
+    private static void initStatic()
+    {
+        int[] ids = createArray();
+        staticTextureId = ids[0];
+        staticFboId = ids[1];
+        staticInitialized = true;
+    }
+
+    /** Allocate one cube-map-array depth texture + FBO, every layer cleared to
+     *  the far plane. Returns {textureId, fboId}; restores touched bindings. */
+    private static int[] createArray()
     {
         int prevTex = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
         int prevFbo = GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
         int prevCubeArray = GL11.glGetInteger(GL40.GL_TEXTURE_BINDING_CUBE_MAP_ARRAY);
 
-        glTextureId = GlStateManager._genTexture();
-        GL11.glBindTexture(GL40.GL_TEXTURE_CUBE_MAP_ARRAY, glTextureId);
+        int textureId = GlStateManager._genTexture();
+        GL11.glBindTexture(GL40.GL_TEXTURE_CUBE_MAP_ARRAY, textureId);
 
         GL12.glTexImage3D(
             GL40.GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL30.GL_DEPTH_COMPONENT32F,
@@ -79,9 +147,9 @@ public final class PointShadowArray
 
         GL11.glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-        glFboId = GL30.glGenFramebuffers();
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, glFboId);
-        GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, glTextureId, 0, 0);
+        int fboId = GL30.glGenFramebuffers();
+        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, fboId);
+        GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, textureId, 0, 0);
         GL11.glDrawBuffer(GL11.GL_NONE);
         GL11.glReadBuffer(GL11.GL_NONE);
 
@@ -93,33 +161,40 @@ public final class PointShadowArray
 
         for (int layer = 0; layer < LAYER_COUNT; layer++)
         {
-            GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, glTextureId, 0, layer);
+            GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, textureId, 0, layer);
             GL11.glClearDepth(1.0);
             GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
         }
-        GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, glTextureId, 0, 0);
+        GL30.glFramebufferTextureLayer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, textureId, 0, 0);
 
         GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, prevFbo);
         GL11.glBindTexture(GL40.GL_TEXTURE_CUBE_MAP_ARRAY, prevCubeArray);
         GlStateManager._bindTexture(prevTex);
 
-        initialized = true;
+        return new int[] { textureId, fboId };
     }
 
     public static void delete()
     {
-        if (!initialized)
+        if (initialized)
         {
-            return;
+            GL11.glDeleteTextures(glTextureId);
+            GL30.glDeleteFramebuffers(glFboId);
+            glTextureId = 0;
+            glFboId = 0;
+            initialized = false;
         }
-        GL11.glDeleteTextures(glTextureId);
-        GL30.glDeleteFramebuffers(glFboId);
-        glTextureId = 0;
-        glFboId = 0;
-        initialized = false;
+        if (staticInitialized)
+        {
+            GL11.glDeleteTextures(staticTextureId);
+            GL30.glDeleteFramebuffers(staticFboId);
+            staticTextureId = 0;
+            staticFboId = 0;
+            staticInitialized = false;
+        }
     }
 
-    /** Switch per-face resolution; frees + re-inits the cube array on next access. */
+    /** Switch per-face resolution; frees + re-inits both arrays on next access. */
     public static void setFaceSize(int newSize)
     {
         if (newSize == FACE_SIZE)

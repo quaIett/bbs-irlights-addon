@@ -50,10 +50,17 @@ import java.util.Locale;
  * blocks, and film replays (all via the BBS FormRenderer / MorphRenderer). A
  * per-light signature cache (see {@link #bake}) skips the GL depth render for
  * any light whose own geometry, in-range static occluders and world blocks are
- * unchanged; a light with a live entity/replay in range always re-bakes. Atlas
- * tiles / cube slots are STICKY per light id (see {@link #acquireTile}), so a
- * light appearing or dropping out does not shift — and thereby re-bake — every
- * other light's map.
+ * unchanged. Atlas tiles / cube slots are STICKY per light id (see
+ * {@link #acquireTile}), so a light appearing or dropping out does not shift —
+ * and thereby re-bake — every other light's map.
+ *
+ * TWO-LAYER bake: a light with a live entity/replay in range runs in OVERLAY
+ * mode — its static content (model blocks + world blocks) is baked into a
+ * separate STATIC tile only when that content changes, then each frame the
+ * base is GPU-copied into the live tile and just the dynamic casters render on
+ * top. Re-tessellating cutout blocks / re-rendering model-block form trees no
+ * longer happens per frame, so the per-frame cost of an animated scene depends
+ * on the moving subjects, not on the scenery around the lamp.
  */
 public final class ShadowBaker
 {
@@ -90,12 +97,24 @@ public final class ShadowBaker
     private static final Long2LongOpenHashMap lastSig = new Long2LongOpenHashMap();
     private static final Long2IntOpenHashMap lastTile = new Long2IntOpenHashMap();
     private static final Long2ObjectOpenHashMap<List<BlockShadowEntry>> lastBlocks = new Long2ObjectOpenHashMap<>();
-    /** Ids whose last bake included a dynamic (entity/replay) occluder. Dynamic
-     *  casters aren't in lastSig (they force a re-bake every frame instead), so
-     *  when the subject leaves range the signature returns to its earlier value
-     *  and the cache would otherwise reuse the last map with the subject still
-     *  baked in. This forces ONE trailing re-bake to clear it. */
+    /** Ids whose LIVE tile currently contains dynamic (entity/replay) casters.
+     *  Dynamic casters aren't in lastSig (they re-render every frame instead),
+     *  so when the subject leaves range the signature returns to its earlier
+     *  value and the cache would otherwise reuse the last map with the subject
+     *  still baked in. While set, the light runs in overlay mode; the frame the
+     *  subject is gone restores a clean static base (copy or bake) once. */
     private static final LongOpenHashSet wasDynamic = new LongOpenHashSet();
+
+    // --- Static-layer (base) tile state, parallel to the live maps above -----
+    // A light's STATIC tile/cube holds only its static content (model blocks +
+    // world blocks) and is re-baked only when that content changes. On overlay
+    // frames (dynamic subject in range) the base is GPU-copied into the live
+    // tile and just the dynamic casters are re-rendered on top — the per-frame
+    // cost no longer depends on how much static scenery surrounds the lamp.
+    // Same id key + same eviction rules (purge/reset/retain) as the live maps.
+    private static final Long2LongOpenHashMap lastStaticSig = new Long2LongOpenHashMap();
+    private static final Long2IntOpenHashMap lastStaticTile = new Long2IntOpenHashMap();
+    private static final Long2ObjectOpenHashMap<List<BlockShadowEntry>> lastStaticBlocks = new Long2ObjectOpenHashMap<>();
 
     /** Set true by {@link #scanInRange} when any in-range occluder is an entity
      *  or film replay (a dynamic subject) -> the light re-bakes every frame. */
@@ -103,6 +122,9 @@ public final class ShadowBaker
     /** Set by {@link #scanInRange} to the order-independent sum of the in-range
      *  model-block {@link #ostatichash} values. */
     private static long staticOccSigScratch;
+    /** Set by {@link #scanInRange} to the number of in-range model-block
+     *  (static) occluders. */
+    private static int staticInRangeScratch;
 
     // --- Sticky tile / cube-slot ownership ------------------------------------
     // A light KEEPS its atlas tile / cube slot across frames — including frames
@@ -147,8 +169,12 @@ public final class ShadowBaker
     private static long profNanos;
     private static long profMaxNanos;
     private static int profFrames;
+    /** Full static-content bakes (clear + model blocks + world blocks). */
     private static int profSpotBakes;
     private static int profPointBakes;
+    /** Overlay frames (static base copied / cleared + dynamic casters drawn). */
+    private static int profSpotOverlays;
+    private static int profPointOverlays;
     /** Reusable scratch set of all current light ids, used to evict the block-
      *  list + VBO caches for lights that disappeared. */
     private static final LongOpenHashSet liveIds = new LongOpenHashSet();
@@ -291,45 +317,127 @@ public final class ShadowBaker
                 continue; // every tile owned by a recently-active light -> unshadowed
             }
             long sig = lightGeomSig(lx, ly, lz, dx, dy, dz, range, cosOuter, castsShadows) + staticOccSigScratch;
+            boolean dyn = dynamicInRangeScratch;
+            boolean hasStatic = staticInRangeScratch > 0 || !blocks.isEmpty();
+            float outerDeg = (float) Math.toDegrees(coneTheta * 2.0);
+            LightRegistry.setShadowTile(i, myTile);
 
-            boolean dirty = !cache
-                || !lastTile.containsKey(id)        // first bake
-                || dynamicInRangeScratch            // live entity/replay in range
-                || wasDynamic.contains(id)          // dynamic subject just left -> clear it
-                || lastSig.get(id) != sig           // geometry / static occluder moved
-                || lastBlocks.get(id) != blocks     // terrain in range changed
-                || lastTile.get(id) != myTile;       // assigned a different tile
-
-            if (dirty)
+            if (!cache)
             {
+                // Cache disabled: everything straight into the live tile, every frame.
                 if (PROFILE)
                 {
                     profSpotBakes++;
                 }
-                float outerDeg = (float) Math.toDegrees(coneTheta * 2.0);
-                ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg);
+                ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg, false, true);
                 if (entInRange > 0)
                 {
-                    renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, tickDelta);
+                    renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, CASTERS_ALL, tickDelta);
                 }
                 if (!blocks.isEmpty())
                 {
                     ShadowRenderer.renderBlocksDepth(id, blocks);
                 }
                 ShadowRenderer.endPass();
+                rememberLive(id, sig, myTile, blocks, dyn);
+                continue;
             }
 
-            LightRegistry.setShadowTile(i, myTile);
-            lastSig.put(id, sig);
-            lastTile.put(id, myTile);
-            lastBlocks.put(id, blocks);
-            if (dynamicInRangeScratch)
+            if (!dyn && !wasDynamic.contains(id))
+            {
+                // Pure static: bake straight into the live tile when something
+                // changed; otherwise last frame's map is still exactly right.
+                boolean dirty = !lastTile.containsKey(id)   // first bake
+                    || lastSig.get(id) != sig               // geometry / static occluder moved
+                    || lastBlocks.get(id) != blocks         // terrain in range changed
+                    || lastTile.get(id) != myTile;          // assigned a different tile
+                if (dirty)
+                {
+                    if (PROFILE)
+                    {
+                        profSpotBakes++;
+                    }
+                    ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg, false, true);
+                    if (staticInRangeScratch > 0)
+                    {
+                        renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, CASTERS_STATIC, tickDelta);
+                    }
+                    if (!blocks.isEmpty())
+                    {
+                        ShadowRenderer.renderBlocksDepth(id, blocks);
+                    }
+                    ShadowRenderer.endPass();
+                }
+                rememberLive(id, sig, myTile, blocks, false);
+                continue;
+            }
+
+            // Overlay mode: a dynamic subject is in range (or just left). The
+            // static base lives in the STATIC tile, re-baked only when it
+            // changes; every frame it is GPU-copied into the live tile and only
+            // the dynamic casters are re-rendered on top — the per-frame cost
+            // no longer scales with the static scenery around the lamp.
+            if (hasStatic)
+            {
+                boolean staticStale = !lastStaticTile.containsKey(id)
+                    || lastStaticSig.get(id) != sig
+                    || lastStaticBlocks.get(id) != blocks
+                    || lastStaticTile.get(id) != myTile;
+                if (staticStale)
+                {
+                    if (PROFILE)
+                    {
+                        profSpotBakes++;
+                    }
+                    ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg, true, true);
+                    if (staticInRangeScratch > 0)
+                    {
+                        renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, CASTERS_STATIC, tickDelta);
+                    }
+                    if (!blocks.isEmpty())
+                    {
+                        ShadowRenderer.renderBlocksDepth(id, blocks);
+                    }
+                    ShadowRenderer.endPass();
+                    lastStaticSig.put(id, sig);
+                    lastStaticTile.put(id, myTile);
+                    lastStaticBlocks.put(id, blocks);
+                }
+                SpotlightDepthAtlas.copyStaticToLive(myTile);
+                if (dyn)
+                {
+                    if (PROFILE)
+                    {
+                        profSpotOverlays++;
+                    }
+                    ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg, false, false);
+                    renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, CASTERS_DYNAMIC, tickDelta);
+                    ShadowRenderer.endPass();
+                }
+            }
+            else
+            {
+                // No static content at all: clear + dynamic casters only.
+                if (PROFILE && dyn)
+                {
+                    profSpotOverlays++;
+                }
+                ShadowRenderer.beginSpot(myTile, lx, ly, lz, dx, dy, dz, range, outerDeg, false, true);
+                if (dyn)
+                {
+                    renderInRangeCone(lx, ly, lz, range, ndx, ndy, ndz, coneTheta, CASTERS_DYNAMIC, tickDelta);
+                }
+                ShadowRenderer.endPass();
+            }
+
+            if (dyn)
             {
                 wasDynamic.add(id);
             }
             else
             {
-                wasDynamic.remove(id);
+                // Subject just left: the live tile holds pure static content again.
+                rememberLive(id, sig, myTile, blocks, false);
             }
         }
 
@@ -374,27 +482,23 @@ public final class ShadowBaker
                 continue; // every slot owned by a recently-active light -> unshadowed
             }
             long sig = lightGeomSig(lx, ly, lz, 0f, 0f, 0f, radius, 1f, castsShadows) + staticOccSigScratch;
+            boolean dyn = dynamicInRangeScratch;
+            boolean hasStatic = staticInRangeScratch > 0 || !blocks.isEmpty();
+            LightRegistry.setShadowTile(i, myLayer);
 
-            boolean dirty = !cache
-                || !lastTile.containsKey(id)
-                || dynamicInRangeScratch
-                || wasDynamic.contains(id)
-                || lastSig.get(id) != sig
-                || lastBlocks.get(id) != blocks
-                || lastTile.get(id) != myLayer;
-
-            if (dirty)
+            if (!cache)
             {
+                // Cache disabled: everything into all live faces, every frame.
                 if (PROFILE)
                 {
                     profPointBakes++;
                 }
                 for (int face = 0; face < 6; face++)
                 {
-                    ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius);
+                    ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius, false, true);
                     if (entInRange > 0)
                     {
-                        renderInRangeFace(lx, ly, lz, radius, face, tickDelta);
+                        renderInRangeFace(lx, ly, lz, radius, face, CASTERS_ALL, tickDelta);
                     }
                     if (!blocks.isEmpty())
                     {
@@ -402,19 +506,118 @@ public final class ShadowBaker
                     }
                     ShadowRenderer.endPass();
                 }
+                rememberLive(id, sig, myLayer, blocks, dyn);
+                continue;
             }
 
-            LightRegistry.setShadowTile(i, myLayer);
-            lastSig.put(id, sig);
-            lastTile.put(id, myLayer);
-            lastBlocks.put(id, blocks);
-            if (dynamicInRangeScratch)
+            if (!dyn && !wasDynamic.contains(id))
+            {
+                // Pure static (see the spot loop).
+                boolean dirty = !lastTile.containsKey(id)
+                    || lastSig.get(id) != sig
+                    || lastBlocks.get(id) != blocks
+                    || lastTile.get(id) != myLayer;
+                if (dirty)
+                {
+                    if (PROFILE)
+                    {
+                        profPointBakes++;
+                    }
+                    for (int face = 0; face < 6; face++)
+                    {
+                        ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius, false, true);
+                        if (staticInRangeScratch > 0)
+                        {
+                            renderInRangeFace(lx, ly, lz, radius, face, CASTERS_STATIC, tickDelta);
+                        }
+                        if (!blocks.isEmpty())
+                        {
+                            ShadowRenderer.renderBlocksDepth(id, blocks);
+                        }
+                        ShadowRenderer.endPass();
+                    }
+                }
+                rememberLive(id, sig, myLayer, blocks, false);
+                continue;
+            }
+
+            // Overlay mode (see the spot loop). The whole static cube is
+            // restored with ONE 6-face GPU copy; dynamic casters then redraw
+            // only into the faces their spheres actually touch.
+            if (hasStatic)
+            {
+                boolean staticStale = !lastStaticTile.containsKey(id)
+                    || lastStaticSig.get(id) != sig
+                    || lastStaticBlocks.get(id) != blocks
+                    || lastStaticTile.get(id) != myLayer;
+                if (staticStale)
+                {
+                    if (PROFILE)
+                    {
+                        profPointBakes++;
+                    }
+                    for (int face = 0; face < 6; face++)
+                    {
+                        ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius, true, true);
+                        if (staticInRangeScratch > 0)
+                        {
+                            renderInRangeFace(lx, ly, lz, radius, face, CASTERS_STATIC, tickDelta);
+                        }
+                        if (!blocks.isEmpty())
+                        {
+                            ShadowRenderer.renderBlocksDepth(id, blocks);
+                        }
+                        ShadowRenderer.endPass();
+                    }
+                    lastStaticSig.put(id, sig);
+                    lastStaticTile.put(id, myLayer);
+                    lastStaticBlocks.put(id, blocks);
+                }
+                PointShadowArray.copyStaticToLive(myLayer);
+                if (dyn)
+                {
+                    if (PROFILE)
+                    {
+                        profPointOverlays++;
+                    }
+                    for (int face = 0; face < 6; face++)
+                    {
+                        if (!faceHasDynamic(lx, ly, lz, radius, face))
+                        {
+                            continue; // the copy already refreshed this face
+                        }
+                        ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius, false, false);
+                        renderInRangeFace(lx, ly, lz, radius, face, CASTERS_DYNAMIC, tickDelta);
+                        ShadowRenderer.endPass();
+                    }
+                }
+            }
+            else
+            {
+                // No static content: every face still clears (a vacated face
+                // would keep a phantom shadow), dynamics drawn where they reach.
+                if (PROFILE && dyn)
+                {
+                    profPointOverlays++;
+                }
+                for (int face = 0; face < 6; face++)
+                {
+                    ShadowRenderer.beginPointFace(myLayer, face, lx, ly, lz, radius, false, true);
+                    if (dyn)
+                    {
+                        renderInRangeFace(lx, ly, lz, radius, face, CASTERS_DYNAMIC, tickDelta);
+                    }
+                    ShadowRenderer.endPass();
+                }
+            }
+
+            if (dyn)
             {
                 wasDynamic.add(id);
             }
             else
             {
-                wasDynamic.remove(id);
+                rememberLive(id, sig, myLayer, blocks, false);
             }
         }
 
@@ -510,6 +713,9 @@ public final class ShadowBaker
         lastSig.remove(id);
         lastTile.remove(id);
         lastBlocks.remove(id);
+        lastStaticSig.remove(id);
+        lastStaticTile.remove(id);
+        lastStaticBlocks.remove(id);
         wasDynamic.remove(id);
     }
 
@@ -523,7 +729,28 @@ public final class ShadowBaker
         lastSig.clear();
         lastTile.clear();
         lastBlocks.clear();
+        lastStaticSig.clear();
+        lastStaticTile.clear();
+        lastStaticBlocks.clear();
         wasDynamic.clear();
+    }
+
+    /** Record that the LIVE tile now holds this light's pure static content
+     *  (a static bake or a static->live copy), or — with {@code dyn} — that it
+     *  contains dynamic casters and must run the overlay path until they go. */
+    private static void rememberLive(long id, long sig, int tile, List<BlockShadowEntry> blocks, boolean dyn)
+    {
+        lastSig.put(id, sig);
+        lastTile.put(id, tile);
+        lastBlocks.put(id, blocks);
+        if (dyn)
+        {
+            wasDynamic.add(id);
+        }
+        else
+        {
+            wasDynamic.remove(id);
+        }
     }
 
     /** Accumulate one frame into the profiler window and log roughly once per
@@ -549,9 +776,10 @@ public final class ShadowBaker
         }
 
         System.out.println(String.format(Locale.ROOT,
-            "[irlite] shadows: bake avg %.2f ms, max %.2f ms | rebakes: %d spot, %d point(x6) | occluders %d, lights %d | %d frames",
+            "[irlite] shadows: bake avg %.2f ms, max %.2f ms | static bakes: %d spot, %d point(x6) | overlays: %d spot, %d point | occluders %d, lights %d | %d frames",
             profNanos / 1e6 / Math.max(profFrames, 1), profMaxNanos / 1e6,
-            profSpotBakes, profPointBakes, occCount, LightRegistry.getCount(), profFrames));
+            profSpotBakes, profPointBakes, profSpotOverlays, profPointOverlays,
+            occCount, LightRegistry.getCount(), profFrames));
 
         profWindowStart = now;
         profNanos = 0L;
@@ -559,6 +787,8 @@ public final class ShadowBaker
         profFrames = 0;
         profSpotBakes = 0;
         profPointBakes = 0;
+        profSpotOverlays = 0;
+        profPointOverlays = 0;
     }
 
     /** Drop per-light dirty state for ids not in {@code keep}. An empty set
@@ -576,6 +806,18 @@ public final class ShadowBaker
         if (!lastBlocks.isEmpty())
         {
             lastBlocks.keySet().retainAll(keep);
+        }
+        if (!lastStaticSig.isEmpty())
+        {
+            lastStaticSig.keySet().retainAll(keep);
+        }
+        if (!lastStaticTile.isEmpty())
+        {
+            lastStaticTile.keySet().retainAll(keep);
+        }
+        if (!lastStaticBlocks.isEmpty())
+        {
+            lastStaticBlocks.keySet().retainAll(keep);
         }
         if (!wasDynamic.isEmpty())
         {
@@ -628,6 +870,7 @@ public final class ShadowBaker
                                    float dirX, float dirY, float dirZ, float coneTheta, boolean cone)
     {
         int c = 0;
+        int statics = 0;
         boolean dyn = false;
         long sig = 0L;
         for (int k = 0; k < occCount; k++)
@@ -646,6 +889,7 @@ public final class ShadowBaker
             if (occType[k] == ShadowRenderer.CASTER_MODEL_BLOCK)
             {
                 sig += ostatichash[k];
+                statics++;
             }
             else
             {
@@ -654,17 +898,69 @@ public final class ShadowBaker
         }
         dynamicInRangeScratch = dyn;
         staticOccSigScratch = sig;
+        staticInRangeScratch = statics;
         return c;
     }
 
-    /** Render in-range occluders inside a spot's lit cone (see {@link #insideCone}).
-     *  Must match {@link #scanInRange}'s cone test exactly, so the rendered set
-     *  equals the counted set that gated this bake. */
-    private static void renderInRangeCone(float lx, float ly, float lz, float reachBase,
-                                          float dirX, float dirY, float dirZ, float coneTheta, float tickDelta)
+    /** Caster-type filters for the renderInRange* helpers: everything (legacy
+     *  no-cache path), only model blocks (the static base layer), or only
+     *  entities/replays (the per-frame dynamic overlay). */
+    private static final int CASTERS_ALL = 0;
+    private static final int CASTERS_STATIC = 1;
+    private static final int CASTERS_DYNAMIC = 2;
+
+    private static boolean casterMatches(int filter, int type)
+    {
+        if (filter == CASTERS_STATIC)
+        {
+            return type == ShadowRenderer.CASTER_MODEL_BLOCK;
+        }
+        if (filter == CASTERS_DYNAMIC)
+        {
+            return type != ShadowRenderer.CASTER_MODEL_BLOCK;
+        }
+        return true;
+    }
+
+    /** True when any in-range DYNAMIC occluder's sphere touches this cube
+     *  face's frustum — lets the overlay pass skip faces that the static
+     *  copy already refreshed. */
+    private static boolean faceHasDynamic(float lx, float ly, float lz, float reachBase, int face)
     {
         for (int k = 0; k < occCount; k++)
         {
+            if (occType[k] == ShadowRenderer.CASTER_MODEL_BLOCK)
+            {
+                continue;
+            }
+            float vx = ox[k] - lx, vy = oy[k] - ly, vz = oz[k] - lz;
+            float reach = reachBase + orad[k];
+            if (vx * vx + vy * vy + vz * vz > reach * reach)
+            {
+                continue;
+            }
+            if (sphereTouchesFace(face, vx, vy, vz, orad[k] * SQRT2))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Render in-range occluders of the filtered type inside a spot's lit cone
+     *  (see {@link #insideCone}). The range + cone tests must match
+     *  {@link #scanInRange} exactly, so the rendered set equals the counted set
+     *  that gated this bake. */
+    private static void renderInRangeCone(float lx, float ly, float lz, float reachBase,
+                                          float dirX, float dirY, float dirZ, float coneTheta,
+                                          int filter, float tickDelta)
+    {
+        for (int k = 0; k < occCount; k++)
+        {
+            if (!casterMatches(filter, occType[k]))
+            {
+                continue;
+            }
             float ddx = ox[k] - lx, ddy = oy[k] - ly, ddz = oz[k] - lz;
             float reach = reachBase + orad[k];
             if (ddx * ddx + ddy * ddy + ddz * ddz > reach * reach)
@@ -679,15 +975,19 @@ public final class ShadowBaker
         }
     }
 
-    /** Render in-range occluders that could intersect ONE point-cube face's 90°
-     *  frustum (face index per {@link ShadowRenderer#beginPointFace}); the other
-     *  five faces never see them, removing ~5/6 of the caster draws per point.
-     *  The face is still cleared even when nothing renders, so a just-vacated
-     *  face shows no stale shadow. */
-    private static void renderInRangeFace(float lx, float ly, float lz, float reachBase, int face, float tickDelta)
+    /** Render in-range occluders of the filtered type that could intersect ONE
+     *  point-cube face's 90° frustum (face index per
+     *  {@link ShadowRenderer#beginPointFace}); the other five faces never see
+     *  them, removing ~5/6 of the caster draws per point. */
+    private static void renderInRangeFace(float lx, float ly, float lz, float reachBase, int face,
+                                          int filter, float tickDelta)
     {
         for (int k = 0; k < occCount; k++)
         {
+            if (!casterMatches(filter, occType[k]))
+            {
+                continue;
+            }
             float vx = ox[k] - lx, vy = oy[k] - ly, vz = oz[k] - lz;
             float reach = reachBase + orad[k];
             if (vx * vx + vy * vy + vz * vz > reach * reach)

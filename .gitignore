@@ -115,6 +115,9 @@ gradle-app.setting
 run/
 runs/
 
+# IDE compile output (javac/Eclipse from patcher validation)
+bin/
+
 # Reference sources
 sources/
 shaders/

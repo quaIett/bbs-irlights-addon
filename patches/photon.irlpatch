@@ -79,9 +79,13 @@
 #define IRLITE_TOON_SMOOTH 0.10 // [0.0 0.05 0.10 0.20 0.30 0.50]
 
 //#define IRLITE_OUTLINE
+#define IRLITE_OUTLINE_TARGET 1 // [0 1]
 #define IRLITE_OUTLINE_PIXEL_SIZE 2 // [1 2 3 4 5]
-#define IRLITE_OUTLINE_FRESNEL_POWER 2.0 // [1.0 1.5 2.0 3.0 4.0 6.0]
 #define IRLITE_OUTLINE_STRENGTH 1.0 // [0.25 0.5 1.0 1.5 2.0 3.0 5.0]
+#define IRLITE_OUTLINE_WRAP 0.5 // [0.0 0.25 0.5 0.75 1.0]
+#define IRLITE_OUTLINE_DEPTH_THRESHOLD 0.05 // [0.02 0.03 0.05 0.08 0.12 0.20]
+//#define IRLITE_OUTLINE_CREASE
+#define IRLITE_OUTLINE_CREASE_ANGLE 45 // [30 45 60 90]
 
 // ---- SSBO (binding 7) — byte-for-byte mirror of LightBuffer.java std430 ----
 struct IrliteLight
@@ -139,39 +143,9 @@ float irlite_toon(float x)
     #endif
 }
 
-// Depth-edge factor for the light outline (ported from LocalLightOutlineFactor),
-// adapted to Photon: linearise the combined depth buffer instead of IterationRP's
-// LinearDepth_From_ScreenDepth(depthtex0). Off by default — only compiled when on.
-#ifdef IRLITE_OUTLINE
-float irlite_linDepth(ivec2 t)
-{
-    return abs(screen_to_view_space_depth(
-        combined_projection_matrix_inverse,
-        texelFetch(combined_depth_tex, t, 0).x));
-}
-
-float irlite_outlineFactor()
-{
-    int ps = IRLITE_OUTLINE_PIXEL_SIZE;
-    ivec2 tc = ivec2(gl_FragCoord.xy);
-    ivec2 mx = textureSize(combined_depth_tex, 0) - ivec2(1);
-
-    float zC = irlite_linDepth(clamp(tc, ivec2(0), mx));
-    ivec2 tr = clamp(tc - ps, ivec2(0), mx);
-    ivec2 bl = clamp(tc + ps, ivec2(0), mx);
-    float z0 = irlite_linDepth(tr);
-    float z1 = irlite_linDepth(bl);
-    float z2 = irlite_linDepth(clamp(ivec2(tr.x, bl.y), ivec2(0), mx));
-    float z3 = irlite_linDepth(clamp(ivec2(bl.x, tr.y), ivec2(0), mx));
-
-    float dz0 = z0 - zC, dz1 = z1 - zC, dz2 = z2 - zC, dz3 = z3 - zC;
-    float maxBehind = max(max(max(dz0, dz1), dz2), dz3);
-    float edgeness = max(abs(dz0 - dz1), abs(dz2 - dz3));
-    float zM = max(zC, 1.0);
-
-    return smoothstep(0.10, 0.22, maxBehind / zM) * smoothstep(0.05, 0.12, edgeness / zM);
-}
-#endif
+// Blender-style outline edge mask (silhouette + crease + border detection).
+// The file self-guards on IRLITE_OUTLINE && PROGRAM_DEFERRED4.
+#include "/include/irlite/irlite_outline.glsl"
 
 #endif // PROGRAM_DEFERRED4 (toon + outline) — shadow sampling below is shared
 
@@ -495,13 +469,16 @@ float irlite_pointShadow(vec3 fragWorld, vec3 normal, IrliteLight light, bool fa
 // (range/falloff/cone) and — critically — the PCSS shadow visibility are
 // computed once and shared by both terms, halving the shadow taps per lit
 // pixel. Outputs stay separate because the call site multiplies diffuse by
-// albedo (light-on-surface) while specular is an additive highlight.
-// fragWorld = ABSOLUTE world position (Photon); viewDir points toward the
-// camera (= -direction_world). Both outputs are in Photon working space
-// (Rec.2020) with the original 5x surface/energy baselines; the master
-// intensities are applied at the call site.
-void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material material, bool nonTerrain,
-                         out vec3 diffuseOut, out vec3 specularOut)
+// albedo (light-on-surface), specular is an additive highlight, and outline
+// is additive ink in the light's own color (never albedo-tinted, so the line
+// stays visible on dark surfaces).
+// fragWorld = ABSOLUTE world position (Photon); flatNormal = the per-face
+// gbuffer normal (outline gates on it — texture normals would speckle the
+// line); viewDir points toward the camera (= -direction_world). All outputs
+// are in Photon working space (Rec.2020) with the original 5x surface/energy
+// baselines; the master intensities are applied at the call site.
+void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 flatNormal, vec3 viewDir, Material material,
+                         bool nonTerrain, out vec3 diffuseOut, out vec3 specularOut, out vec3 outlineOut)
 {
     vec3 n = normalize(normal);
     vec3 v = normalize(viewDir);
@@ -510,12 +487,18 @@ void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material mat
 
     diffuseOut = vec3(0.0);
     specularOut = vec3(0.0);
+    outlineOut = vec3(0.0);
     uint count = irlite_lightCount;
 
     #ifdef IRLITE_OUTLINE
-        float NdotV = abs(dot(n, v));
-        float fresnel = pow(clamp(1.0 - NdotV, 0.0, 1.0), float(IRLITE_OUTLINE_FRESNEL_POWER));
-        float contourFactor = irlite_outlineFactor() * fresnel;
+        vec3 nF = normalize(flatNormal);
+        // The edge mask is pure geometry — shared by every light. Computed
+        // LAZILY: -1 = not computed yet; the first light that actually
+        // reaches this pixel pays for the detector, unlit pixels never do.
+        float edgeMask = -1.0;
+        #if IRLITE_OUTLINE_TARGET == 1
+            if (!nonTerrain) edgeMask = 0.0;   // entities-only mode: terrain gets no line
+        #endif
     #endif
 
     for (uint i = 0u; i < count; i++)
@@ -564,11 +547,36 @@ void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material mat
         vec3 lightCol = (light.colorIntensity.rgb * rec709_to_rec2020) * light.colorIntensity.a;
 
         float diffuse = irlite_toon(attenuation * ndl);
-        float contour = 0.0;
+        diffuseOut += lightCol * diffuse;
+
         #ifdef IRLITE_OUTLINE
-            contour = contourFactor * (1.0 - ndl) * attenuation * IRLITE_OUTLINE_STRENGTH;
+            // Light-driven RIM ink: a contour line is light wrapping the
+            // object from behind or the side — a frontal light floods the
+            // form evenly and draws NO line. Per light, on top of the
+            // geometric edge mask:
+            //   frontKill — angular gate on dot(L, v): 1 for backlight,
+            //     fading to 0 as the light approaches the camera axis.
+            //     IRLITE_OUTLINE_WRAP positions the cutoff (0 = strict
+            //     backlight only, 0.5 = side + back, 1 = nearly any angle).
+            //   backKill — the contour side facing AWAY from the light is
+            //     never grazed by it; kill it even with shadows off.
+            //   The narrow smoothstep BINARIZES reach (range falloff, spot
+            //   cone, shadow, backKill) so the stroke stays uniform along
+            //   its length and only fades across the on/off boundaries
+            //   (shadow penumbra, cone edge, range edge).
+            if (edgeMask != 0.0)
+            {
+                float wrapC = 2.0 * IRLITE_OUTLINE_WRAP - 1.0;
+                float frontKill = 1.0 - smoothstep(wrapC - 0.25, wrapC + 0.25, dot(L, v));
+                float backKill = smoothstep(-0.35, -0.05, dot(nF, L));
+                float ink = smoothstep(0.02, 0.10, attenuation * backKill) * frontKill;
+                if (ink > 1e-4)
+                {
+                    if (edgeMask < 0.0) edgeMask = irlite_outlineMask(nF, nonTerrain);
+                    outlineOut += lightCol * (edgeMask * ink * IRLITE_OUTLINE_STRENGTH);
+                }
+            }
         #endif
-        diffuseOut += lightCol * (diffuse + contour);
 
         if (doSpec && ndl > 0.0)
         {
@@ -583,9 +591,11 @@ void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material mat
         }
     }
 
-    // 5x baselines (original surfaceMult/energyMult = 5.0).
+    // 5x baselines (original surfaceMult/energyMult = 5.0; outline shares the
+    // scale so STRENGTH 1.0 is comparable to the diffuse highlights).
     diffuseOut *= 5.0;
     specularOut *= 5.0;
+    outlineOut *= 5.0;
 }
 
 #endif // PROGRAM_DEFERRED4 (surface: diffuse + specular)
@@ -905,6 +915,138 @@ vec3 irlite_volumetric(vec3 startWorld, vec3 endWorld, vec3 worldDir, float dith
 
 >>>
 
+# --- outline edge-mask detector (silhouette / crease / border) for the surface pass ---
++file shaders/include/irlite/irlite_outline.glsl
+<<<
+#if !defined INCLUDE_IRLITE_OUTLINE
+#define INCLUDE_IRLITE_OUTLINE
+
+/*
+  IRLite outline — Blender Line Art-style edge mask, detected in screen space
+  from the deferred gbuffer. Three edge types, mirroring Blender's line sets:
+
+    silhouette — depth discontinuity between the object and whatever is behind;
+    crease     — sharp bend between two faces of the same surface
+                 (IRLITE_OUTLINE_CREASE, threshold IRLITE_OUTLINE_CREASE_ANGLE);
+    border     — entity/terrain boundary at touching depth (feet contact, a
+                 model standing against a wall) where the depth test sees no gap
+                 but the gbuffer entity bit does.
+
+  The mask is pure geometry — 0..1 line coverage at this pixel. Which lights
+  ink it, in what color and how strongly is decided by the per-light loop in
+  irlite_lights.glsl (the mask is computed lazily there, once, on the first
+  light that actually reaches the pixel).
+
+  Silhouette detection is a second-difference (Laplacian) test on linear view
+  depth: for each opposite sample pair A/B around the center C the quantity
+  zA + zB - 2*zC is ~0 on ANY plane regardless of view angle — the slope term
+  cancels between the two sides — and goes strongly positive only when C sits
+  in FRONT of a depth gap. Two properties follow for free:
+    - slope-immune: no false lines on floors stretching away at grazing angles,
+      with no tangent-plane reconstruction and no screen-space derivatives;
+    - one-sided: the far side of the gap sees a negative difference, so the
+      line lands only on the near (object) pixels, hugging the silhouette.
+  A thin feature (pole, spear shaft) with background on BOTH sides only pushes
+  the difference higher — it cannot cancel out.
+
+  Lives in PROGRAM_DEFERRED4 only: needs combined_depth_tex, colortex1 and the
+  space-conversion/encoding helpers that d4_deferred_shading has in scope.
+*/
+
+#if defined IRLITE_OUTLINE && defined PROGRAM_DEFERRED4
+
+// Linear view-space depth of a gbuffer texel. Sky resolves through the far
+// plane to a huge value — clamped so the silhouette difference stays finite.
+float irlite_outlineLinDepth(ivec2 t)
+{
+    float raw = texelFetch(combined_depth_tex, t, 0).x;
+    float z = abs(screen_to_view_space_depth(combined_projection_matrix_inverse, raw));
+    return min(z, 65536.0);
+}
+
+// Edge mask at this fragment: 0 = no line, 1 = full line. centerFlatNormal
+// must be the NORMALIZED flat (per-face) normal — texture normals would
+// speckle the crease test. centerEntity = the gbuffer bit-7 entity flag.
+float irlite_outlineMask(vec3 centerFlatNormal, bool centerEntity)
+{
+    const int ps = IRLITE_OUTLINE_PIXEL_SIZE;
+    const int pd = max((IRLITE_OUTLINE_PIXEL_SIZE * 707 + 500) / 1000, 1);   // round(ps / sqrt(2))
+
+    // 8 samples on a ring of radius ps: 4 axis + 4 diagonal, laid out as
+    // opposite pairs (2p, 2p+1). The diagonal step is shortened so the
+    // footprint is round and the line width is direction-independent.
+    ivec2 offs[8] = ivec2[8](
+        ivec2( ps,  0), ivec2(-ps,   0),
+        ivec2(  0, ps), ivec2(  0, -ps),
+        ivec2( pd, pd), ivec2(-pd, -pd),
+        ivec2(-pd, pd), ivec2( pd, -pd));
+
+    ivec2 tc = ivec2(gl_FragCoord.xy);
+    // Clamp to the RENDERED region, not the texture: at TAAU render scale
+    // < 1.0 only the lower-left part of the buffers holds the frame (same
+    // convention as Photon's own edge_highlight).
+    ivec2 tMax = ivec2(view_res * taau_render_scale) - ivec2(1);
+
+    float zC = irlite_outlineLinDepth(tc);
+
+    float z[8];
+    for (int i = 0; i < 8; i++)
+        z[i] = irlite_outlineLinDepth(clamp(tc + offs[i], ivec2(0), tMax));
+
+    // --- silhouette: second difference over the 4 opposite pairs -----------
+    // Threshold is RELATIVE depth (fraction of view distance), so sensitivity
+    // is constant near and far; the smoothstep band gives the line sub-pixel
+    // anti-aliasing instead of a binary stair.
+    const float T = IRLITE_OUTLINE_DEPTH_THRESHOLD;
+    float score = 0.0;
+    for (int p = 0; p < 4; p++)
+    {
+        float rel = (z[2 * p] + z[2 * p + 1] - 2.0 * zC) / zC;
+        score += smoothstep(T, 2.0 * T, rel);
+    }
+
+    // --- crease + border: need the neighbours' gbuffer data ----------------
+    #ifdef IRLITE_OUTLINE_CREASE
+        float cosCrease = cos(radians(float(IRLITE_OUTLINE_CREASE_ANGLE)));
+    #endif
+    for (int i = 0; i < 8; i++)
+    {
+        vec4 gdata = texelFetch(colortex1, clamp(tc + offs[i], ivec2(0), tMax), 0);
+        uint mByte = uint(255.0 * unpack_unorm_2x8(gdata.y).y);
+        bool sEntity = (mByte & 128u) != 0u;
+
+        // border: line on the entity side only (one-sided, like silhouette)
+        if (centerEntity && !sEntity)
+            score += 0.5;
+
+        #ifdef IRLITE_OUTLINE_CREASE
+            // crease: same surface only — no depth gap (silhouettes are
+            // handled above, and sky/background normals are garbage) and the
+            // same entity class. The bend test is a smooth band around the
+            // threshold angle so crease lines get anti-aliased ends.
+            float relGap = abs(z[i] - zC) / zC;
+            if (relGap < T && sEntity == centerEntity)
+            {
+                vec3 nS = decode_unit_vector(unpack_unorm_2x8(gdata.z));
+                float bend = 1.0 - smoothstep(cosCrease - 0.06, cosCrease + 0.06,
+                                              dot(centerFlatNormal, nS));
+                score += 0.5 * bend;
+            }
+        #endif
+    }
+
+    // One full trigger (a pair across a silhouette, two crease/border
+    // neighbours) is a solid line; partial triggers fade out — that is the
+    // anti-aliased fringe of the stroke.
+    return smoothstep(0.35, 1.0, score);
+}
+
+#endif // IRLITE_OUTLINE && PROGRAM_DEFERRED4
+
+#endif // INCLUDE_IRLITE_OUTLINE
+
+>>>
+
 # --- diffuse + specular in the main deferred opaque shading pass ---
 @file shaders/program/d4_deferred_shading.fsh
 
@@ -928,28 +1070,36 @@ after "uint material_mask = uint(255.0 * data[1].y);"
 
 before "        // Specular highlight"
 <<<
-        // IRLite point/spot lights — diffuse + specular in ONE pass (the
-        // per-light shadow visibility is computed once and shared by both).
+        // IRLite point/spot lights — diffuse + specular + outline in ONE pass
+        // (the per-light shadow visibility is computed once and shared).
         // Diffuse is light-on-surface: multiplied by albedo, like
         // get_diffuse_lighting which folds albedo in internally; specular is
-        // an additive highlight (runs in all dimensions).
-#if defined IRLITE_DIFFUSE || defined IRLITE_SPECULAR
+        // an additive highlight (runs in all dimensions); outline is additive
+        // ink in the light's own color — NOT albedo-multiplied, so the line
+        // stays visible on dark surfaces (Blender-style stroke).
+#if defined IRLITE_DIFFUSE || defined IRLITE_SPECULAR || defined IRLITE_OUTLINE
         vec3 irlite_diffuse;
         vec3 irlite_specular;
+        vec3 irlite_outline;
         irlite_lightSurface(
             position_world,
             normal,
+            flat_normal,
             -direction_world,
             material,
             irlite_nonTerrain,
             irlite_diffuse,
-            irlite_specular
+            irlite_specular,
+            irlite_outline
         );
 #ifdef IRLITE_DIFFUSE
         fragment_color += IRLITE_INTENSITY * irlite_diffuse * material.albedo;
 #endif
 #ifdef IRLITE_SPECULAR
         fragment_color += (IRLITE_INTENSITY * IRLITE_SPECULAR_INTENSITY) * irlite_specular;
+#endif
+#ifdef IRLITE_OUTLINE
+        fragment_color += IRLITE_INTENSITY * irlite_outline;
 #endif
 #endif
 
@@ -1019,12 +1169,12 @@ screen.irlite_specular   = IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY
 screen.irlite_volumetric = IRLITE_VOLUMETRIC IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_MAX_DIST IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS
 screen.irlite_shadows    = IRLITE_SHADOWS IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS
 screen.irlite_toon       = IRLITE_TOON IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
-screen.irlite_outline    = IRLITE_OUTLINE IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_STRENGTH
+screen.irlite_outline    = IRLITE_OUTLINE IRLITE_OUTLINE_TARGET IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_WRAP IRLITE_OUTLINE_DEPTH_THRESHOLD IRLITE_OUTLINE_CREASE IRLITE_OUTLINE_CREASE_ANGLE
 >>>
 
 replace "DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS"
 <<<
-DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_STRENGTH
+DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_WRAP IRLITE_OUTLINE_DEPTH_THRESHOLD IRLITE_OUTLINE_CREASE_ANGLE
 >>>
 
 replace "iris.features.optional = CUSTOM_IMAGES ENTITY_TRANSLUCENT"
@@ -1082,14 +1232,27 @@ option.IRLITE_TOON_BANDS               = §aToon Bands
 option.IRLITE_TOON_SMOOTH              = §aToon Smoothing
 
 option.IRLITE_OUTLINE                  = §eOutline
-option.IRLITE_OUTLINE.comment          = Draw a light-colored rim where an IRLite light grazes a silhouette edge
-option.IRLITE_OUTLINE_PIXEL_SIZE       = §eOutline Thickness
-option.IRLITE_OUTLINE_FRESNEL_POWER    = §eOutline Fresnel Power
-option.IRLITE_OUTLINE_STRENGTH         = §eOutline Strength
+option.IRLITE_OUTLINE.comment          = Crisp Blender-style contour in the light's color, drawn where an IRLite light wraps the object from behind or the side (rim). Frontal light draws no line
+option.IRLITE_OUTLINE_TARGET           = §eOutline Target
+option.IRLITE_OUTLINE_TARGET.comment   = What receives outlines. Entities only is recommended - on block terrain every block seam counts as an edge
+value.IRLITE_OUTLINE_TARGET.0          = All Surfaces
+value.IRLITE_OUTLINE_TARGET.1          = Entities Only
+option.IRLITE_OUTLINE_PIXEL_SIZE       = §eLine Width
+option.IRLITE_OUTLINE_PIXEL_SIZE.comment = Stroke width in pixels, constant at any distance
+option.IRLITE_OUTLINE_STRENGTH         = §eLine Brightness
+option.IRLITE_OUTLINE_WRAP             = §eLight Wrap
+option.IRLITE_OUTLINE_WRAP.comment     = Which light directions ink the contour: 0 = strict backlight only, 0.5 = side and back light, 1 = nearly any direction
+option.IRLITE_OUTLINE_DEPTH_THRESHOLD  = §eDepth Sensitivity
+option.IRLITE_OUTLINE_DEPTH_THRESHOLD.comment = Depth gap (as a fraction of view distance) treated as a silhouette edge. Lower = more sensitive
+option.IRLITE_OUTLINE_CREASE           = §eCrease Lines
+option.IRLITE_OUTLINE_CREASE.comment   = Also draw lines on sharp edges inside the silhouette, like Blender crease lines
+option.IRLITE_OUTLINE_CREASE_ANGLE     = §eCrease Angle
+option.IRLITE_OUTLINE_CREASE_ANGLE.comment = Minimum bend between face normals to count as a crease. Lower = more lines
 
 suffix.IRLITE_VL_MAX_DIST              = m
 suffix.IRLITE_VL_TIP_RADIUS            = m
 suffix.IRLITE_OUTLINE_PIXEL_SIZE       = px
+suffix.IRLITE_OUTLINE_CREASE_ANGLE     = °
 >>>
 
 # --- SSBO #extension on every wrapper that declares the binding-7 buffer:

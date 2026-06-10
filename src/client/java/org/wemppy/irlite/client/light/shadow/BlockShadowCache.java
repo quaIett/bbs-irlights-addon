@@ -20,8 +20,9 @@ import java.util.List;
  *
  * Avoids re-walking each light's bbox (thousands of getBlockState calls) every
  * frame. Three invalidation triggers:
- *   1. Light moved / range changed -> hash mismatch in getOrCompute (checked
- *      every frame, cheap).
+ *   1. Light moved into another 1-block cell / range crossed a whole block ->
+ *      hash mismatch in getOrCompute (checked every frame, cheap; the sphere
+ *      is quantized so sub-block motion of a moving lamp does NOT re-collect).
  *   2. A block in range changed -> invalidateAt(pos) from WorldBlockChangeMixin,
  *      via a section index (chunk-section key -> set of light ids overlapping it).
  *   3. Light no longer present -> retainOnly(liveIds) evicts it (and drains the
@@ -57,21 +58,41 @@ public final class BlockShadowCache
     {
     }
 
-    /** Return this light's block list, recollecting only when its position/
-     *  radius changed (hash) or a block in range was invalidated. The clamped
+    /** Worst-case distance between a light and its snapped collection center
+     *  (half the 1-block cell diagonal, √3/2 ≈ 0.866), padded onto the radius
+     *  so the quantized superset covers the true sphere anywhere in the cell. */
+    private static final float SNAP_PAD = 0.87f;
+
+    /** Return this light's block list, recollecting only when its collection
+     *  sphere changed (hash) or a block in range was invalidated. The clamped
      *  collection radius must be passed (the caller clamps), so the section
-     *  index matches the collected volume. */
+     *  index matches the collected volume.
+     *
+     *  The sphere is QUANTIZED before hashing/collecting: the center snaps to
+     *  the nearest block corner and the radius rounds up to a whole block,
+     *  padded by the worst-case snap distance. A continuously-moving light
+     *  (entity/replay-mounted, or a transform-animated model block) used to
+     *  change the raw-float hash EVERY frame and re-walk ~(2r)^3 block states
+     *  + rebuild its shadow VBO each time; now it re-collects only when it
+     *  crosses into another 1-block cell (and the cached list instance stays
+     *  stable in between, which the VBO cache keys on). Blocks the padding
+     *  pulls in past the light's range are clipped by the bake far plane. */
     public static List<BlockShadowEntry> getOrCompute(long id, ClientWorld world,
                                                       float lx, float ly, float lz, float radius)
     {
-        long h = hash(lx, ly, lz, radius);
+        float cx = Math.round(lx);
+        float cy = Math.round(ly);
+        float cz = Math.round(lz);
+        float cr = (float) Math.ceil(radius) + SNAP_PAD;
+
+        long h = hash(cx, cy, cz, cr);
         CacheEntry e = byId.get(id);
         if (e != null && e.hash == h && e.list != null)
         {
             return e.list;
         }
 
-        List<BlockShadowEntry> fresh = BlockShadowCollector.collectForLight(world, lx, ly, lz, radius);
+        List<BlockShadowEntry> fresh = BlockShadowCollector.collectForLight(world, cx, cy, cz, cr);
         if (e == null)
         {
             e = new CacheEntry();
@@ -79,7 +100,7 @@ public final class BlockShadowCache
         }
         e.list = fresh;
         e.hash = h;
-        rebuildSectionIndex(id, e, lx, ly, lz, radius);
+        rebuildSectionIndex(id, e, cx, cy, cz, cr);
         return fresh;
     }
 

@@ -9,6 +9,7 @@
     "GameRendererLightMixin",
     "L10nMixin",
     "UIFormEditorMixin",
+    "UIReplaysEditorColorMixin",
     "UISettingsOverlayPanelMixin",
     "WorldBlockChangeMixin",
     "bbs.FilmsAccessor",

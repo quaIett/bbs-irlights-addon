@@ -5,11 +5,15 @@
 #
 # Complementary is FORWARD-shaded, so diffuse+specular hook DoLighting() in
 # lib/lighting/mainLighting.glsl (covers all 12 gbuffers programs; the entity
-# flag is compile-time). Volumetrics AND the outline both hook composite1 вЂ”
-# the outline must run after the translucent phase because BBS replay models
-# render through the translucent entity programs. No wrapper edits: the pack
-# is #version 130 and the inject carries its own in-file #extension lines
-# (the pack's own SSBO idiom); the SSBO feature flag is already declared.
+# flag is compile-time). The volumetric march runs in an ADDED reduced-
+# resolution pass (deferred2 -> colortex10, sized by the IRLITE_VL_RESOLUTION
+# option through the pack's own REFLECTION_RES size.buffer mechanism);
+# composite1 bilinear-upsamples it and hosts the rim outline вЂ” the outline
+# must run after the translucent phase because BBS replay models render
+# through the translucent entity programs. No wrapper edits beyond the added
+# deferred2 pair: the pack is #version 130 and the inject carries its own
+# in-file #extension lines (the pack's own SSBO idiom); the SSBO feature
+# flag is already declared.
 @name    Complementary lights
 @target  ComplementaryReimagined
 @marker  IRLITE
@@ -29,12 +33,16 @@
   and volumetrics arrive in later phases (their option #defines are already
   here so the settings screen stays stable — Iris scans GLSL for options).
 
-  TWO PASSES WILL INCLUDE THIS ONE FILE:
-    - SURFACE (#ifndef COMPOSITE1) — via mainLighting.glsl into the forward
-      gbuffers programs (terrain/entities/block/hand/water/textured/...).
+  THREE PASSES INCLUDE THIS ONE FILE:
+    - SURFACE (#ifdef IRLITE_SURFACE_PASS, defined by mainLighting.glsl) — the
+      forward gbuffers programs (terrain/entities/block/hand/water/textured/...).
       Uses pack symbols GGX / gbufferModelView(Inverse) / cameraPosition
       (all in scope there: common.glsl -> uniforms.glsl, ggx.glsl).
-    - VOLUMETRIC (#ifdef COMPOSITE1) — program/composite1.glsl (Phase 3).
+    - VOLUMETRIC MARCH (#ifdef IRLITE_VL_PASS, defined by the ADDED
+      program/deferred2.glsl) — marches the beams at REDUCED RESOLUTION into
+      colortex10, sized by IRLITE_VL_RESOLUTION via size.buffer.
+    - COMPOSITE (#ifdef COMPOSITE1) — program/composite1.glsl hosts the rim
+      outline half and the bilinear upsample of the VL buffer.
   The SSBO block + options are shared between the halves.
 
   Complementary deltas vs the Photon inject:
@@ -57,7 +65,7 @@
 // ---- options (exposed in the IRLite shader settings screen, Phase 4) ----
 #define IRLITE_DIFFUSE
 #define IRLITE_SPECULAR
-#define IRLITE_VOLUMETRIC                  // per-light volumetric beams/haze (composite1)
+#define IRLITE_VOLUMETRIC                  // per-light volumetric beams/haze (reduced-res deferred2 pass)
 #define IRLITE_INTENSITY 1.0 // [0.1 0.25 0.5 0.75 1.0 1.5 2.0 3.0 4.0]
 #define IRLITE_SPECULAR_INTENSITY 1.0 // [0.0 0.25 0.5 0.75 1.0 1.5 2.0 3.0 4.0]
 
@@ -68,8 +76,10 @@
 #define IRLITE_SHADOW_NORMAL_OFFSET 0.05 // [0.0 0.02 0.05 0.10 0.15 0.25 0.40]
 
 #define IRLITE_VL_SHADOWS                  // per-step shadowing of the VL beams/haze; active only with IRLITE_SHADOWS on
+#define IRLITE_VL_SHADOW_STRIDE 2 // [1 2 3 4]
+#define IRLITE_VL_RESOLUTION 0.5 // [1.0 0.5 0.25]
 #define IRLITE_VL_INTENSITY 1.0 // [0.1 0.25 0.5 0.75 1.0 1.5 2.0 3.0 4.0 6.0]
-#define IRLITE_VL_STEPS 14 // [8 12 14 16 24 32 48 64]
+#define IRLITE_VL_STEPS 10 // [6 8 10 12 14 16 24 32]
 #define IRLITE_VL_TIP_BOOST 1.5 // [0.0 0.5 1.0 1.5 2.0 3.0 4.0]
 #define IRLITE_VL_TIP_RADIUS 1.5 // [0.5 0.75 1.0 1.5 2.0 3.0 4.0]
 #define IRLITE_VL_MAX_DIST 96.0 // [32.0 64.0 96.0 128.0 192.0 256.0]
@@ -121,19 +131,19 @@ const float IRLITE_PI = 3.14159265;
 
 // Compile the baked-shadow sampling block (samplers + spot/point sample funcs)
 // when a pass needs it: the forward surface passes (IRLITE_SURFACE_PASS,
-// defined by mainLighting.glsl right before its include), deferred1 when the
-// outline inks with shadowed attenuation, and the composite1 volumetric pass
-// when IRLITE_VL_SHADOWS occludes the beams/haze. Additionally gated on the
-// master IRLITE_SHADOWS toggle so turning shadows off in the settings also
-// removes the samplerCubeArray declaration — the one construct at #version 130
-// a strict driver could reject (escape hatch).
-#if defined IRLITE_SHADOWS && (defined IRLITE_SURFACE_PASS || (defined COMPOSITE1 && defined IRLITE_OUTLINE) || (defined COMPOSITE1 && defined IRLITE_VOLUMETRIC && defined IRLITE_VL_SHADOWS))
+// defined by mainLighting.glsl right before its include), composite1 when the
+// outline inks with shadowed attenuation, and the reduced-res deferred2 VL
+// pass (IRLITE_VL_PASS) when IRLITE_VL_SHADOWS occludes the beams/haze.
+// Additionally gated on the master IRLITE_SHADOWS toggle so turning shadows
+// off in the settings also removes the samplerCubeArray declaration — the one
+// construct at #version 130 a strict driver could reject (escape hatch).
+#if defined IRLITE_SHADOWS && (defined IRLITE_SURFACE_PASS || (defined COMPOSITE1 && defined IRLITE_OUTLINE) || (defined IRLITE_VL_PASS && defined IRLITE_VOLUMETRIC && defined IRLITE_VL_SHADOWS))
     #define IRLITE_COMPILE_SHADOWS
 #endif
 
 // ============================================================================
 //  SHADOW SAMPLING — shared by the surface passes (diffuse/specular shadows)
-//  and, in Phase 3, the composite1 volumetric pass (per-step beam occlusion).
+//  and the reduced-res deferred2 VL pass (per-step beam occlusion).
 //  Depends only on the SSBO + the two depth samplers. Ported verbatim from the
 //  Photon inject.
 // ============================================================================
@@ -770,10 +780,16 @@ void irlite_lightSurface(vec3 playerPos, vec3 normalM, vec3 nViewPos, float smoo
 #endif // IRLITE_SURFACE_PASS (surface half)
 
 // ============================================================================
-//  VOLUMETRIC half — compiled only into program/composite1.glsl (COMPOSITE1),
-//  which runs FULL-RES (unlike Photon's quarter-res c0_vl — watch step cost).
-//  Per-light single-scatter: ray-cone clip (spot) / ray-sphere clip (point) +
-//  Beer-Lambert transmittance + Henyey-Greenstein phase + gaussian tip glow.
+//  VOLUMETRIC half — compiled only into the ADDED program/deferred2.glsl
+//  (IRLITE_VL_PASS, defined there right before the include). That pass writes
+//  ONLY colortex10, which shaders.properties sizes at IRLITE_VL_RESOLUTION
+//  (Half by default, the pack's own REFLECTION_RES mechanism) — the viewport
+//  shrinks with the buffer, so the march costs 1/4 (Half) or 1/16 (Quarter)
+//  of full-res. composite1 then bilinear-upsamples + adds (the Photon c0_vl
+//  mechanism, rebuilt here — hosting the march in full-res composite1 tanked
+//  FPS whenever a beam covered the screen). Per-light single-scatter:
+//  ray-cone clip (spot) / ray-sphere clip (point) + Beer-Lambert
+//  transmittance + Henyey-Greenstein phase + gaussian tip glow.
 //  The result is ADDED TO color AFTER composite1's pow(color, 2.2) — i.e. in
 //  LINEAR space — so the light colour stays RAW LINEAR here (no 1/2.2 curve;
 //  the gamma conversion in the surface half is the asymmetry, not a bug).
@@ -781,12 +797,12 @@ void irlite_lightSurface(vec3 playerPos, vec3 normalM, vec3 nViewPos, float smoo
 //  Ported verbatim from the Photon inject (absolute-world march): origin =
 //  startWorld (camera eye), end = endWorld (opaque/sky hit), positions stay
 //  relative to the ray origin (pos = worldDir*t), lightVec = posRadius.xyz -
-//  startWorld. First sample jittered with composite1's `dither` (temporal
-//  blue-noise under TAA).
+//  startWorld. First sample jittered with the pass's dither (composite1's
+//  temporal blue-noise idiom under TAA).
 // ============================================================================
 // (Nested plain #ifdef — see the outline half note: bare #ifdef is what makes
 // Iris register the IRLITE_VOLUMETRIC toggle as configurable.)
-#ifdef COMPOSITE1
+#ifdef IRLITE_VL_PASS
 #ifdef IRLITE_VOLUMETRIC
 
 // Henyey-Greenstein phase (g>0 forward scatter), normalised to 1/4pi.
@@ -869,8 +885,8 @@ vec2 irlite_rayCone(vec3 rO, vec3 rD, vec3 apex, vec3 axis, float cosHalfAngle, 
 }
 
 // (Outer bare #ifdef registers the IRLITE_VL_SHADOWS toggle with Iris; the
-// inner gate is what actually controls compilation — in composite1 it already
-// implies IRLITE_VL_SHADOWS && IRLITE_SHADOWS.)
+// inner gate is what actually controls compilation — in the VL pass it
+// already implies IRLITE_VL_SHADOWS && IRLITE_SHADOWS.)
 #ifdef IRLITE_VL_SHADOWS
 #ifdef IRLITE_COMPILE_SHADOWS
 // Fast per-march-step shadow taps. The full irlite_*Shadow functions rebuild
@@ -880,7 +896,7 @@ vec2 irlite_rayCone(vec3 rO, vec3 rD, vec3 apex, vec3 axis, float cosHalfAngle, 
 // + compares ONE depth tap. The math mirrors the hard paths of
 // irlite_spotShadow / irlite_pointShadow exactly, including the normal-offset
 // with normal = L (mid-volume there is no surface normal), which collapses to
-// a 2*offset nudge toward the light. (In composite1 IRLITE_COMPILE_SHADOWS =
+// a 2*offset nudge toward the light. (In the VL pass IRLITE_COMPILE_SHADOWS =
 // IRLITE_SHADOWS && IRLITE_VL_SHADOWS — VL shadows need the baked maps.)
 
 // toR = offset-nudged receiver relative to the light (light -> receiver).
@@ -955,6 +971,9 @@ vec3 irlite_volumetric(vec3 startWorld, vec3 endWorld, vec3 worldDir, float dith
         // volumetrics. Colour stays RAW LINEAR (added after the pow-2.2 line).
         vec3 lightCol = light.colorIntensity.rgb
                       * light.colorIntensity.a * max(light.vlParams.z, 0.0);
+        // beamStrength 0 (or a black light) — skip BEFORE the intersection
+        // math: the march would only accumulate zeros at full per-step cost.
+        if (dot(lightCol, lightCol) < 1e-8) continue;
         float g = clamp(light.vlParams.x, -0.95, 0.95);
         float extinction = max(light.vlParams.y, 1e-4);
         bool isSpot = light.dirType.w > 0.5;
@@ -1029,6 +1048,9 @@ vec3 irlite_volumetric(vec3 startWorld, vec3 endWorld, vec3 worldDir, float dith
 
         float transmittance = 1.0;
         vec3 acc = vec3(0.0);
+        #ifdef IRLITE_COMPILE_SHADOWS
+            float shadowVis = 1.0;   // cached across strided steps
+        #endif
 
         for (int s = 0; s < steps; s++, pos += stepV)
         {
@@ -1069,10 +1091,21 @@ vec3 irlite_volumetric(vec3 startWorld, vec3 endWorld, vec3 worldDir, float dith
             #ifdef IRLITE_COMPILE_SHADOWS
                 if (shHas && atten > 0.01)
                 {
-                    visibility = isSpot
-                        ? irlite_vlSpotStep(2.0 * IRLITE_SHADOW_NORMAL_OFFSET * L - toLight,
-                                            shS, shU, axis, shFY, range, shTx, shTy)
-                        : irlite_vlPointStep(toLight, dist, range, shLayer);
+                    // This fetch is the march's hot spot (the point path
+                    // samples a CUBE ARRAY) — tap the baked map only every
+                    // IRLITE_VL_SHADOW_STRIDE-th step and reuse the cached
+                    // visibility in between. The dithered ray start keeps
+                    // the quantization from banding.
+                    #if IRLITE_VL_SHADOW_STRIDE > 1
+                    if (s % IRLITE_VL_SHADOW_STRIDE == 0)
+                    #endif
+                    {
+                        shadowVis = isSpot
+                            ? irlite_vlSpotStep(2.0 * IRLITE_SHADOW_NORMAL_OFFSET * L - toLight,
+                                                shS, shU, axis, shFY, range, shTx, shTy)
+                            : irlite_vlPointStep(toLight, dist, range, shLayer);
+                    }
+                    visibility = shadowVis;
                 }
             #endif
 
@@ -1090,11 +1123,179 @@ vec3 irlite_volumetric(vec3 startWorld, vec3 endWorld, vec3 worldDir, float dith
 }
 
 #endif // IRLITE_VOLUMETRIC
-#endif // COMPOSITE1
+#endif // IRLITE_VL_PASS (volumetric half)
+
+// ---- composite1 upsample side ----------------------------------------------
+// The reduced-res VL buffer written by the IRLite deferred2 pass; composite1
+// bilinear-upsamples it (declared here — neither composite1.glsl nor the
+// pack's uniforms.glsl declares colortex10; deferred2 must NOT see this
+// declaration since it RENDERS to that buffer).
+#ifdef COMPOSITE1
+#ifdef IRLITE_VOLUMETRIC
+uniform sampler2D colortex10;
+#endif
+#endif
 
 #endif // IRLITE_ACTIVE
 
 #endif // INCLUDE_IRLITE_LIGHTS
+
+>>>
+
+# --- the added reduced-resolution volumetric pass ---
++file shaders/program/deferred2.glsl
+<<<
+/////////////////////////////////////
+// Complementary Shaders by EminGT //
+/////////////////////////////////////
+
+/*
+deferred2 — ADDED BY THE IRLITE INJECT (not part of pristine Complementary).
+Marches the IRLite per-light volumetrics at REDUCED RESOLUTION: this program
+writes ONLY colortex10, which shaders.properties sizes at a fraction of the
+screen (size.buffer.colortex10 = IRLITE_VL_RESOLUTION, the pack's own
+REFLECTION_RES mechanism). The pass viewport shrinks with its only render
+target, so every covered pixel's ray march costs a quarter (Half) or a
+sixteenth (Quarter) of the full-res price — the same mechanism Photon uses
+for its quarter-res fog pass. program/composite1.glsl then bilinear-upsamples
+the buffer, applies the underwater/lava parity and adds it to color.
+Runs at the deferred stage (after solid gbuffers): depthtex0 holds the OPAQUE
+depth there, which is exactly the march end the composite1-hosted march used
+(z1) — beams deliberately continue behind translucents/BBS replay models.
+The whole pass is program-toggled off when IRLITE_VOLUMETRIC is disabled
+(program.world*\/deferred2.enabled in shaders.properties).
+*/
+
+//Common//
+#include "/lib/common.glsl"
+
+//////////Fragment Shader//////////Fragment Shader//////////Fragment Shader//////////
+#ifdef FRAGMENT_SHADER
+
+noperspective in vec2 texCoord;
+
+//Pipeline Constants//
+
+//Common Variables//
+vec2 view = vec2(viewWidth, viewHeight);
+
+//Common Functions//
+
+//Includes//
+#include "/lib/util/spaceConversion.glsl"
+
+#define IRLITE_VL_PASS
+#include "/lib/irlite/irlite_lights.glsl"
+
+//Program//
+void main() {
+    vec3 irliteVL = vec3(0.0);
+
+    #if defined IRLITE_ACTIVE && defined IRLITE_VOLUMETRIC
+        // NOT texelFetch: gl_FragCoord lives in the REDUCED viewport while
+        // depthtex0 stays full-res — normalized texCoord maps correctly.
+        float z0 = texture2D(depthtex0, texCoord).r;   // opaque depth (translucents are not drawn yet)
+
+        vec3 viewPos = ScreenToView(vec3(texCoord, z0));
+        vec3 playerPos = ViewToPlayer(viewPos);
+
+        float dither = texture2DLod(noisetex, texCoord * view / 128.0, 0.0).b;
+        #ifdef TAA
+            dither = fract(dither + goldenRatio * mod(float(frameCounter), 3600.0));
+        #endif
+
+        irliteVL = irlite_volumetric(cameraPosition, cameraPosition + playerPos,
+                                     normalize(playerPos), dither);
+    #endif
+
+    /* RENDERTARGETS: 10 */
+    gl_FragData[0] = vec4(irliteVL, 1.0);
+}
+
+#endif
+
+//////////Vertex Shader//////////Vertex Shader//////////Vertex Shader//////////
+#ifdef VERTEX_SHADER
+
+noperspective out vec2 texCoord;
+
+//Attributes//
+
+//Common Variables//
+
+//Common Functions//
+
+//Includes//
+
+//Program//
+void main() {
+    gl_Position = ftransform();
+
+    texCoord = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
+}
+
+#endif
+
+>>>
++file shaders/world0/deferred2.fsh
+<<<
+#version 130
+
+#define FRAGMENT_SHADER
+#define OVERWORLD
+#define DEFERRED2
+
+#include "/program/deferred2.glsl"
+>>>
++file shaders/world0/deferred2.vsh
+<<<
+#version 130
+
+#define VERTEX_SHADER
+#define OVERWORLD
+#define DEFERRED2
+
+#include "/program/deferred2.glsl"
+>>>
++file shaders/world1/deferred2.fsh
+<<<
+#version 130
+
+#define FRAGMENT_SHADER
+#define END
+#define DEFERRED2
+
+#include "/program/deferred2.glsl"
+>>>
++file shaders/world1/deferred2.vsh
+<<<
+#version 130
+
+#define VERTEX_SHADER
+#define END
+#define DEFERRED2
+
+#include "/program/deferred2.glsl"
+>>>
++file shaders/world-1/deferred2.fsh
+<<<
+#version 130
+
+#define FRAGMENT_SHADER
+#define NETHER
+#define DEFERRED2
+
+#include "/program/deferred2.glsl"
+>>>
++file shaders/world-1/deferred2.vsh
+<<<
+#version 130
+
+#define VERTEX_SHADER
+#define NETHER
+#define DEFERRED2
+
+#include "/program/deferred2.glsl"
 >>>
 
 # --- forward diffuse + specular in DoLighting ---
@@ -1130,7 +1331,7 @@ after "    color.rgb += lightHighlight;"
     #endif
 >>>
 
-# --- volumetrics (after pow 2.2, linear) + rim outline (before pow 2.2, gamma) ---
+# --- volumetric upsample (after pow 2.2, linear) + rim outline (before pow 2.2, gamma) ---
 @file shaders/program/composite1.glsl
 after "#include \"/lib/util/spaceConversion.glsl\""
 <<<
@@ -1169,10 +1370,12 @@ after "    color = pow(color, vec3(2.2));"
         // IRLite per-light volumetrics — added in LINEAR space like the pack's
         // own VL below, but as an independent block: it must survive profiles
         // that compile LIGHTSHAFTS_ACTIVE out and the Nether-storm overwrite of
-        // volumetricEffect. Underwater/lava dimming mirrors the pack's handling.
-        vec3 irlitePlayerPos1 = ViewToPlayer(viewPos1.xyz);
-        vec3 irliteVL = irlite_volumetric(cameraPosition, cameraPosition + irlitePlayerPos1,
-                                          normalize(irlitePlayerPos1), dither);
+        // volumetricEffect. The march itself runs at REDUCED RESOLUTION in the
+        // added deferred2 pass (writes colortex10, sized by IRLITE_VL_RESOLUTION
+        // via size.buffer) — here the buffer is just bilinear-upsampled (the
+        // colortex sampler is LINEAR-filtered by default).
+        // Underwater/lava dimming mirrors the pack's handling.
+        vec3 irliteVL = texture2D(colortex10, texCoord).rgb;
         if (isEyeInWater == 1) {
             vec3 irliteUWM = vec3(0.80, 0.87, 0.97) * 0.55;
             irliteVL *= irliteUWM * irliteUWM;
@@ -1183,8 +1386,28 @@ after "    color = pow(color, vec3(2.2));"
     #endif
 >>>
 
-# --- settings screens + sliders ---
+# --- the reduced-res VL buffer format (the pack declares formats inside this comment block) ---
+@file shaders/lib/pipelineSettings.glsl
+after "const int colortex8Format = RGBA16F;        //SSR results for WSR, topmost translucent opacity"
+<<<
+const int colortex10Format = RGB16F;        //IRLite reduced-res volumetric (added deferred2 pass)
+>>>
+
+# --- deferred2 program toggle + buffer size, settings screens + sliders ---
 @file shaders/shaders.properties
+before "# Miscellaneous"
+<<<
+    # IRLite reduced-resolution volumetric pass (added deferred2 -> colortex10)
+    program.world0/deferred2.enabled=IRLITE_VOLUMETRIC
+    program.world-1/deferred2.enabled=IRLITE_VOLUMETRIC
+    program.world1/deferred2.enabled=IRLITE_VOLUMETRIC
+
+>>>
+after "        size.buffer.colortex7 = REFLECTION_RES REFLECTION_RES"
+<<<
+        # IRLite reduced-res volumetric buffer (written by the added deferred2 pass)
+        size.buffer.colortex10 = IRLITE_VL_RESOLUTION IRLITE_VL_RESOLUTION
+>>>
 replace "VANILLAAO_I PLAYER_SHADOW"
 <<<
 VANILLAAO_I PLAYER_SHADOW [IRLITE_SETTINGS]
@@ -1194,13 +1417,13 @@ after "        screen.PIXELATED_LIGHTING_SETTINGS=<empty> <empty> PIXELATED_SHAD
         screen.IRLITE_SETTINGS=<empty> <empty> IRLITE_DIFFUSE IRLITE_INTENSITY <empty> <empty> [IRLITE_SPECULAR_SETTINGS] [IRLITE_SHADOW_SETTINGS] [IRLITE_VL_SETTINGS] [IRLITE_TOON_SETTINGS] [IRLITE_OUTLINE_SETTINGS]
             screen.IRLITE_SPECULAR_SETTINGS=<empty> <empty> IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY
             screen.IRLITE_SHADOW_SETTINGS=<empty> <empty> IRLITE_SHADOWS IRLITE_SHADOW_QUALITY <empty> <empty> IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET
-            screen.IRLITE_VL_SETTINGS=<empty> <empty> IRLITE_VOLUMETRIC IRLITE_VL_SHADOWS IRLITE_VL_INTENSITY IRLITE_VL_STEPS <empty> <empty> IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST
+            screen.IRLITE_VL_SETTINGS=<empty> <empty> IRLITE_VOLUMETRIC IRLITE_VL_SHADOWS IRLITE_VL_INTENSITY IRLITE_VL_RESOLUTION IRLITE_VL_STEPS IRLITE_VL_SHADOW_STRIDE <empty> <empty> IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST
             screen.IRLITE_TOON_SETTINGS=<empty> <empty> IRLITE_TOON <empty> IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
             screen.IRLITE_OUTLINE_SETTINGS=<empty> <empty> IRLITE_OUTLINE IRLITE_OUTLINE_TARGET <empty> <empty> IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_WRAP IRLITE_OUTLINE_DEPTH_THRESHOLD
 >>>
 replace "END_STAR_INTENSITY GENERATED_NORMAL_RES"
 <<<
-END_STAR_INTENSITY GENERATED_NORMAL_RES IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_WRAP IRLITE_OUTLINE_DEPTH_THRESHOLD
+END_STAR_INTENSITY GENERATED_NORMAL_RES IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_SHADOW_STRIDE IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_WRAP IRLITE_OUTLINE_DEPTH_THRESHOLD
 >>>
 
 # --- option labels + tooltips ---
@@ -1263,8 +1486,17 @@ option.IRLITE_VL_SHADOWS.comment=Occludes the beams per march step against the I
 option.IRLITE_VL_INTENSITY=§dVolumetric Intensity
 option.IRLITE_VL_INTENSITY.comment=Multiplier for IRLite volumetric light.
 
+option.IRLITE_VL_RESOLUTION=§dVolumetric Resolution
+option.IRLITE_VL_RESOLUTION.comment=Resolution of the volumetric ray march (its own pass, upsampled afterwards). Half costs a quarter of Full and is the intended default. Quarter matches Photon's volumetric pass — fastest, slightly softer beams.
+value.IRLITE_VL_RESOLUTION.1.0=Full
+value.IRLITE_VL_RESOLUTION.0.5=Half
+value.IRLITE_VL_RESOLUTION.0.25=Quarter
+
 option.IRLITE_VL_STEPS=§dVolumetric Steps
-option.IRLITE_VL_STEPS.comment=Ray-march steps per light. Higher is smoother but costs performance — this pass runs at full resolution.
+option.IRLITE_VL_STEPS.comment=Ray-march steps per light. Higher is smoother but costs performance — every pixel covered by a beam pays for all of its steps (at the resolution set above).
+
+option.IRLITE_VL_SHADOW_STRIDE=§dShadow Step Stride
+option.IRLITE_VL_SHADOW_STRIDE.comment=Tap the IRLite shadow maps every Nth march step and reuse the result in between. The per-step shadow fetch is the most expensive part of the march — 2 roughly halves its cost for slightly softer volumetric shadows. 1 = tap every step.
 
 option.IRLITE_VL_TIP_BOOST=§dTip Glow Boost
 option.IRLITE_VL_TIP_BOOST.comment=Extra glow near the light source itself.

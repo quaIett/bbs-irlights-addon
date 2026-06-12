@@ -239,7 +239,7 @@ public final class IrlPatchApplier
             + "patch: " + patch.name + "\n"
             + "target: " + patch.target + (patch.packVersion.isEmpty() ? "" : " " + patch.packVersion) + "\n"
             + "applied: " + LocalDate.now() + "\n"
-            + "Written by the IRLite shader patcher. Its presence blocks re-patching this pack;\n"
+            + "Written by the IRLights shader patcher. Its presence blocks re-patching this pack;\n"
             + "patch a clean copy of the original pack instead.\n";
         Files.writeString(outputPack.resolve(PatchEngine.MARKER_FILE), text, StandardCharsets.UTF_8);
     }

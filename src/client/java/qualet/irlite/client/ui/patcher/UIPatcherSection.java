@@ -291,7 +291,7 @@ public final class UIPatcherSection
         {
             base = base.substring(0, base.length() - 4);
         }
-        base = base + "_IRLite";
+        base = base + "_IRLights";
 
         if (!createNew)
         {

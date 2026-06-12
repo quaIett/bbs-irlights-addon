@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Parser for the .irlpatch DSL.
+ * Parser for the .irlights patch DSL.
  *
  * <pre>
  * # comment (only outside a &lt;&lt;&lt; ... &gt;&gt;&gt; body)

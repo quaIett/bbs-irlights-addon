@@ -18,7 +18,7 @@ public class L10nMixin
         self.getKey("bbs.config.irlite.tooltip", "IRLite light addon settings");
 
         self.getKey("bbs.config.irlite_patcher.title", "Shader Patcher");
-        self.getKey("bbs.config.irlite_patcher.tooltip", "Apply IRLite .irlpatch files onto shaderpacks");
+        self.getKey("bbs.config.irlite_patcher.tooltip", "Apply IRLights .irlights files onto shaderpacks");
 
         self.getKey("bbs.config.irlite.show_guides", "Show light guides in world");
         self.getKey("bbs.config.irlite.show_guides-comment", "Draw wireframe gizmos for placed PointLight and Spotlight forms in the world.");

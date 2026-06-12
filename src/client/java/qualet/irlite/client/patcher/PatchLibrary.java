@@ -11,10 +11,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
-/** The folder where users drop .irlpatch files: {@code <gameDir>/irlite/patches}. */
+/** The folder where users drop .irlights files: {@code <gameDir>/irlite/patches}. */
 public final class PatchLibrary
 {
-    public static final String EXTENSION = ".irlpatch";
+    public static final String EXTENSION = ".irlights";
 
     private PatchLibrary()
     {}

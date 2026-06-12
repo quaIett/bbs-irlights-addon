@@ -8,7 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 
 /**
- * Applies or validates an .irlpatch against a pack outside Minecraft.
+ * Applies or validates an .irlights patch against a pack outside Minecraft.
  *   PatchHarness <patch> <sourcePack> <outputPack>   apply
  *   PatchHarness -validate <patch> <sourcePack>      dry-run only
  */

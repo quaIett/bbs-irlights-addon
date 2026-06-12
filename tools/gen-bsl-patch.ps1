@@ -1,4 +1,4 @@
-# Generates patches/bsl.irlpatch by splicing the IRLite bodies VERBATIM out of
+# Generates patches/bsl.irlights by splicing the IRLite bodies VERBATIM out of
 # Shadres/Modification/BSL (so the patch reproduces the working tree
 # byte-for-byte). Anchors are unique literals captured from the PRISTINE pack —
 # verified before generation. BSL IS A CRLF PACK: every anchor below is
@@ -10,7 +10,7 @@
 $ErrorActionPreference = "Stop"
 $repo = "C:\Users\Qualet\Documents\Project\Minecraft\BBS\IRLite"
 $mod  = "$repo\Shadres\Modification\BSL\shaders"
-$out  = "$repo\patches\bsl.irlpatch"
+$out  = "$repo\patches\bsl.irlights"
 
 function Lines($path) { [IO.File]::ReadAllLines($path) }
 function FileText($path) { [IO.File]::ReadAllText($path).Replace("`r`n", "`n") }

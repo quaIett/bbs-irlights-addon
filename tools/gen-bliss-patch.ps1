@@ -1,4 +1,4 @@
-# Generates patches/bliss.irlpatch by splicing the IRLite bodies VERBATIM out
+# Generates patches/bliss.irlights by splicing the IRLite bodies VERBATIM out
 # of Shadres/Modification/Bliss (so the patch reproduces the working tree
 # byte-for-byte). Anchors are unique literals captured from the PRISTINE pack.
 # Bliss is a MIXED-EOL pack (mostly CRLF) -> SINGLE-LINE anchors only (see
@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $repo = "C:\Users\Qualet\Documents\Project\Minecraft\BBS\IRLite"
 $mod  = "$repo\Shadres\Modification\Bliss\shaders"
 $pris = "$repo\Shadres\Original\Bliss\shaders"
-$out  = "$repo\patches\bliss.irlpatch"
+$out  = "$repo\patches\bliss.irlights"
 
 function Lines($path) { [IO.File]::ReadAllLines($path) }
 function FileText($path) { [IO.File]::ReadAllText($path).Replace("`r`n", "`n") }

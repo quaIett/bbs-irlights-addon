@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Parsed representation of an .irlpatch file. See {@link IrlPatchParser} for the
+ * Parsed representation of an .irlights patch file. See {@link IrlPatchParser} for the
  * DSL grammar.
  */
 public final class IrlPatch

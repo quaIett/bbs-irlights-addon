@@ -1,4 +1,4 @@
-# Generates patches/complementaryreimagined.irlpatch by splicing the IRLite
+# Generates patches/complementaryreimagined.irlights by splicing the IRLite
 # bodies VERBATIM out of Shadres/Modification/ComplementaryReimagined (so the
 # patch reproduces the working tree byte-for-byte). Anchors are unique literals
 # captured from the PRISTINE pack — verified before generation.
@@ -10,7 +10,7 @@
 $ErrorActionPreference = "Stop"
 $repo = "C:\Users\Qualet\Documents\Project\Minecraft\BBS\IRLite"
 $mod  = "$repo\Shadres\Modification\ComplementaryReimagined\shaders"
-$out  = "$repo\patches\complementaryreimagined.irlpatch"
+$out  = "$repo\patches\complementaryreimagined.irlights"
 
 function Lines($path) { [IO.File]::ReadAllLines($path) }
 function FileText($path) { [IO.File]::ReadAllText($path).Replace("`r`n", "`n") }

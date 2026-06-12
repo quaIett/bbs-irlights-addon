@@ -6,7 +6,7 @@
 	"description": "",
 	"authors": ["wemppy", "qualet"],
 	"contact": {},
-	"license": "MIT",
+	"license": "CC-BY-ND-4.0",
 	"icon": "assets/irlite/icon.png",
 	"environment": "*",
 	"entrypoints": {

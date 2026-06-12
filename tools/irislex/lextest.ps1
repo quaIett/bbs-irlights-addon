@@ -19,7 +19,10 @@ function Resolve-Glsl {
     }
 }
 
-$programs = Get-ChildItem $ShadersRoot -File | Where-Object { $_.Extension -in '.fsh', '.vsh', '.csh' }
+# Root programs live either directly in shaders/ (Solas/BSL style) or in
+# world*/ wrapper folders (Bliss style) - enumerate both.
+$programDirs = @(Get-Item $ShadersRoot) + (Get-ChildItem $ShadersRoot -Directory | Where-Object { $_.Name -like 'world*' })
+$programs = $programDirs | ForEach-Object { Get-ChildItem $_.FullName -File } | Where-Object { $_.Extension -in '.fsh', '.vsh', '.csh' }
 Write-Host "testing $($programs.Count) root programs from $ShadersRoot"
 $fails = 0
 foreach ($prog in $programs) {

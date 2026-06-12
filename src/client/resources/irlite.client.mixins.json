@@ -1,7 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "package": "org.wemppy.irlite.mixin.client",
+  "package": "qualet.irlite.mixin.client",
   "compatibilityLevel": "JAVA_17",
   "client": [
     "ExtraFormSectionMixin",

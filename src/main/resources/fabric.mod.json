@@ -10,9 +10,9 @@
 	"icon": "assets/irlite/icon.png",
 	"environment": "*",
 	"entrypoints": {
-		"fabric-datagen": ["org.wemppy.irlite.client.IrliteDataGenerator"],
-		"client": ["org.wemppy.irlite.client.IrliteClient"],
-		"main": ["org.wemppy.irlite.Irlite"]
+		"fabric-datagen": ["qualet.irlite.client.IrliteDataGenerator"],
+		"client": ["qualet.irlite.client.IrliteClient"],
+		"main": ["qualet.irlite.Irlite"]
 	},
 	"mixins": [
 		"irlite.mixins.json",

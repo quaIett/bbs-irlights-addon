@@ -1,7 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "package": "org.wemppy.irlite.mixin",
+  "package": "qualet.irlite.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
     "BBSModMixin",

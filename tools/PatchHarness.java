@@ -1,7 +1,7 @@
-import org.wemppy.irlite.client.patcher.IrlPatch;
-import org.wemppy.irlite.client.patcher.IrlPatchApplier;
-import org.wemppy.irlite.client.patcher.IrlPatchParser;
-import org.wemppy.irlite.client.patcher.PatchResult;
+import qualet.irlite.client.patcher.IrlPatch;
+import qualet.irlite.client.patcher.IrlPatchApplier;
+import qualet.irlite.client.patcher.IrlPatchParser;
+import qualet.irlite.client.patcher.PatchResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

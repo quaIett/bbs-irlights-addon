@@ -3,6 +3,38 @@ plugins {
     id 'maven-publish'
 }
 
+// --- Multi-version dev profile selector (-Pmc=1.20.1 | 1.20.4) ---
+// Picks Minecraft / yarn / Fabric API / BBS jar / Iris / Sodium coordinates for
+// the target version. The PRODUCT jar is built against 1.20.1 (lower version =
+// most stable intermediary names "upward"); 1.20.4 is used to dev-test the
+// 1.20.4 path. The compiled jar is universal across the depends range either way.
+def mcTarget = (project.findProperty('mc') ?: '1.20.1').toString()
+def mcVersions = [
+    '1.20.1': [
+        minecraft: '1.20.1',
+        yarn     : '1.20.1+build.10',
+        fabricApi: '0.92.9+1.20.1',
+        bbsJar   : 'libs/bbs-2.2-dev3-1.20.1.jar',
+        sodium   : 'mc1.20.1-0.5.11',
+        iris     : '1.7.2+1.20.1',
+        lwjglPin : '3.3.1',
+    ],
+    '1.20.4': [
+        minecraft: '1.20.4',
+        yarn     : '1.20.4+build.1',
+        fabricApi: '0.91.1+1.20.4',
+        bbsJar   : 'libs/bbs-2.2-1.20.4.jar',
+        sodium   : 'mc1.20.4-0.5.8',
+        iris     : '1.7.2+1.20.4',
+        lwjglPin : null,
+    ],
+]
+if (!mcVersions.containsKey(mcTarget)) {
+    throw new GradleException("Unknown -Pmc=${mcTarget}; expected 1.20.1 or 1.20.4")
+}
+def V = mcVersions[mcTarget]
+logger.lifecycle("IRLite build target: Minecraft ${V.minecraft} (yarn ${V.yarn})")
+
 version = project.mod_version
 group = project.maven_group
 
@@ -46,27 +78,30 @@ repositories {
 
 // Minecraft 1.20.1 ships LWJGL 3.3.1; a transitive dep bumps it to 3.3.2,
 // which Sodium refuses to start against. Pin every LWJGL module back to 3.3.1.
-configurations.all {
-    resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == "org.lwjgl") {
-            details.useVersion "3.3.1"
+// 1.20.4 ships LWJGL 3.3.3 and needs no pin (V.lwjglPin = null).
+if (V.lwjglPin != null) {
+    configurations.all {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == "org.lwjgl") {
+                details.useVersion V.lwjglPin
+            }
         }
     }
 }
 
 dependencies {
-    // To change the versions see the gradle.properties file
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    // Versions are chosen by the -Pmc selector at the top of this file.
+    minecraft "com.mojang:minecraft:${V.minecraft}"
+    mappings "net.fabricmc:yarn:${V.yarn}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${V.fabricApi}"
 
-    modImplementation files("libs/bbs-2.2-dev3-1.20.1.jar")
+    modImplementation files(V.bbsJar)
 
-    // Sodium + Iris, loaded in runClient.
-    modImplementation "maven.modrinth:sodium:mc1.20.1-0.5.11"
-    modImplementation "maven.modrinth:iris:1.7.2+1.20.1"
+    // Iris is referenced at compile time (sampler mixins). Sodium is runtime-only.
+    modImplementation "maven.modrinth:iris:${V.iris}"
+    modRuntimeOnly "maven.modrinth:sodium:${V.sodium}"
 
     // Iris runtime dependencies (not auto-pulled from the Modrinth artifact).
     modRuntimeOnly "org.anarres:jcpp:1.4.14"

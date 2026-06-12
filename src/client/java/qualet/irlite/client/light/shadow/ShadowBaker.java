@@ -1092,12 +1092,14 @@ public final class ShadowBaker
             }
 
             Box box = entity.getBoundingBox();
-            float rad = (float) (Math.max(box.getXLength(), Math.max(box.getYLength(), box.getZLength())) * 0.5) + OVERLAP_MARGIN;
+            // Box edge lengths via stable public fields (yarn renamed getXLength()
+            // -> getLengthX() after 1.20.1; fields are identical across versions).
+            float rad = (float) (Math.max(box.maxX - box.minX, Math.max(box.maxY - box.minY, box.maxZ - box.minZ)) * 0.5) + OVERLAP_MARGIN;
 
             occ[occCount] = entity;
             occType[occCount] = ShadowRenderer.CASTER_ENTITY;
             ox[occCount] = (float) ex;
-            oy[occCount] = (float) (ey + box.getYLength() * 0.5);
+            oy[occCount] = (float) (ey + (box.maxY - box.minY) * 0.5);
             oz[occCount] = (float) ez;
             orad[occCount] = rad;
             ostatichash[occCount] = 0L; // dynamic caster -> not part of any static signature

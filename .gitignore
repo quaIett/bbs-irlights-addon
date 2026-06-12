@@ -122,5 +122,8 @@ bin/
 sources/
 shaders/
 
+# Third-party shaderpack workspace (pristine Original/ + working Modification/ copies) — not for publication
+Shadres/
+
 # Avoid ignoring Gradle wrapper jar file (.jar files are usually ignored)
 !gradle-wrapper.jar

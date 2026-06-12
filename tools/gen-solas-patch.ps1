@@ -53,7 +53,7 @@ if ($glBlock[-1] -ne '    #endif') { throw "glBlock tail unexpected" }
 # (before the DRAWBUFFERS line).
 $c1 = Lines "$mod\programs\composite1.glsl"
 $G = IndexOfLine $c1 '// Global Variables //'
-$CS = IndexOfLineStarting $c1 '// IRLite: included BELOW'
+$CS = IndexOfLineStarting $c1 '// IRLite: included below'
 $c1Inc = $c1[$CS..($G - 1)]
 if ($c1Inc[-1] -ne '') { throw "expected trailing blank in c1Inc" }
 if ($c1Inc[-2] -ne '#include "/lib/irlite/irlite_lights.glsl"') { throw "c1Inc include line unexpected" }
@@ -119,22 +119,7 @@ function EmitFile($relPath, $text) {
     Emit '>>>'
 }
 
-Emit '# IRLite — point + spot lights for Solas (by Septonious), ported from the BSL'
-Emit '# inject: diffuse + specular + real-time shadows + volumetrics + toon + rim'
-Emit '# outline, plus an in-shader settings screen (Iris: Shader Pack Settings ->'
-Emit '# Lighting -> IRLite Lights; English AND Russian labels).'
-Emit '#'
-Emit '# Solas is FORWARD-shaded: diffuse+specular hook gbuffersLighting() inside'
-Emit '# its linear window (the function pow-2.2s albedo, mixes lights, re-encodes)'
-Emit '# — one hook covers all 11 includer programs, and the entity flag is'
-Emit '# compile-time via the pack''s own line-1 program self-defines. The'
-Emit '# volumetric march runs in an ADDED reduced-resolution pass (deferred2 ->'
-Emit '# colortex10, sized by the IRLITE_VL_RESOLUTION option via size.buffer);'
-Emit '# composite1 bilinear-upsamples it and hosts the rim outline (subject mask ='
-Emit '# colortex3 alpha 1.0 with blue < 0.1 — entities + block entities, water'
-Emit '# excluded). The pack is #version 130 and the inject carries its own in-file'
-Emit '# #extension lines; iris.features gets SSBO appended (the flag list is'
-Emit '# parsed from the RAW properties — one line is enough for every branch).'
+Emit '# IRLite point + spot lights for Solas (by Septonious).'
 Emit '@name    Solas lights'
 Emit '@target  Solas'
 Emit '@irlite  1'

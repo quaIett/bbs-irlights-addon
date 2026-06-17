@@ -6,42 +6,21 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
-import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
-import mchorse.bbs_mod.client.renderer.MorphRenderer;
-import mchorse.bbs_mod.forms.FormUtilsClient;
-import mchorse.bbs_mod.forms.entities.IEntity;
-import mchorse.bbs_mod.forms.forms.Form;
-import mchorse.bbs_mod.forms.renderers.FormRenderer;
-import mchorse.bbs_mod.forms.renderers.FormRenderType;
-import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
-import mchorse.bbs_mod.utils.MatrixStackUtils;
-import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.VertexBuffer;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.GameRenderer;
-import net.minecraft.client.render.LightmapTextureManager;
-import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.RenderLayers;
 import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.render.block.BlockRenderManager;
-import net.minecraft.client.render.entity.EntityRenderDispatcher;
-import net.minecraft.client.render.entity.LivingEntityRenderer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.RotationAxis;
 import net.minecraft.util.math.random.Random;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -60,7 +39,11 @@ import java.util.List;
 public final class ShadowRenderer
 {
     private static final float NEAR = 0.05f;
-    private static final int FULL_LIGHT = LightmapTextureManager.pack(15, 15);
+
+    // Constant "up" axes for the spot lookAt — lookAt only reads them, so a
+    // shared instance replaces the per-call allocation (T1.3).
+    private static final Vector3f UP_Y = new Vector3f(0f, 1f, 0f);
+    private static final Vector3f UP_Z = new Vector3f(0f, 0f, 1f);
 
     private static boolean inPass = false;
     /** True once {@link #savePassState} has snapshotted the original GL state
@@ -82,6 +65,28 @@ public final class ShadowRenderer
      *  RenderSystem. The block batch draws with this + currentView directly,
      *  NOT RenderSystem's live matrices, which a caster can leave corrupted. */
     private static final Matrix4f currentProj = new Matrix4f();
+
+    // --- Reused matrix scratch (T1.3) ----------------------------------------
+    // RenderSystem.setProjectionMatrix copies its argument, and the block batch
+    // draws with currentProj (a copy made in applyMatrices), so reusing these
+    // projection objects across passes is safe — endPass restores the saved one.
+    /** Spot projection; rebuilt only when its fov/far change (all of a light's
+     *  passes, and consecutive equal lights, reuse it). */
+    private static final Matrix4f spotProj = new Matrix4f();
+    private static float spotProjFov = Float.NaN;
+    private static float spotProjFar = Float.NaN;
+    /** Point projection — identical for all 6 cube faces; rebuilt only when far
+     *  (= radius) changes. */
+    private static final Matrix4f pointProj = new Matrix4f();
+    private static float pointProjFar = Float.NaN;
+    /** Shared per-caster / per-cutout-block MatrixStack (the render thread is
+     *  single-threaded). {@link #resetScratch} drains + identity-resets it
+     *  before each use, so a caster that throws mid-build can't leave it dirty. */
+    private static final MatrixStack scratch = new MatrixStack();
+
+    /** Reused Immediate-backed batch handed to {@link ShadowCasterSource#emitOccluder}
+     *  (the render thread is single-threaded, so one instance is safe). */
+    private static final ImmediateOccluderBatch casterBatch = new ImmediateOccluderBatch();
 
     private ShadowRenderer()
     {}
@@ -124,7 +129,12 @@ public final class ShadowRenderer
 
         float fovDeg = Math.max(outerDeg, 1.0f);
         float far = Math.max(range, NEAR + 0.1f);
-        Matrix4f proj = new Matrix4f().perspective((float) Math.toRadians(fovDeg), 1.0f, NEAR, far);
+        if (fovDeg != spotProjFov || far != spotProjFar)
+        {
+            spotProj.identity().perspective((float) Math.toRadians(fovDeg), 1.0f, NEAR, far);
+            spotProjFov = fovDeg;
+            spotProjFar = far;
+        }
 
         Vector3f up = pickStableUp(ldy);
         currentView.identity().lookAt(
@@ -133,7 +143,7 @@ public final class ShadowRenderer
             up.x, up.y, up.z
         );
 
-        applyMatrices(proj);
+        applyMatrices(spotProj);
     }
 
     /**
@@ -161,7 +171,11 @@ public final class ShadowRenderer
         }
 
         float far = Math.max(radius, NEAR + 0.1f);
-        Matrix4f proj = new Matrix4f().perspective((float) Math.toRadians(90.0), 1.0f, NEAR, far);
+        if (far != pointProjFar)
+        {
+            pointProj.identity().perspective((float) Math.toRadians(90.0), 1.0f, NEAR, far);
+            pointProjFar = far;
+        }
 
         float dx, dy, dz, ux, uy, uz;
         switch (face)
@@ -180,51 +194,77 @@ public final class ShadowRenderer
             ux, uy, uz
         );
 
-        applyMatrices(proj);
+        applyMatrices(pointProj);
     }
 
-    public static final int CASTER_ENTITY = 0;
-    public static final int CASTER_MODEL_BLOCK = 1;
-    public static final int CASTER_REPLAY = 2;
+    // --- Batched caster pass (T2.2) ------------------------------------------
+    // Casters used to flush one immediate.draw() EACH (the old renderCaster), so a
+    // point light with N subjects paid up to 6N GPU flushes — once per caster per
+    // cube face. Now a pass brackets its casters with
+    //   beginCasterBatch() -> emitCaster()* -> endCasterBatch()
+    // and flushes ONCE: the casters accumulate in the shared entity Immediate and
+    // a single draw at the end submits them all, so a pass costs at most one flush
+    // (one per face / per atlas tile) regardless of how many subjects it has.
 
-    public static void renderCaster(Object caster, int casterType, float tickDelta)
+    /** Open a batched caster pass. Pins the depth GL state once for the whole
+     *  batch (each layer's RenderLayer.startDrawing sets the real state at flush
+     *  time, but pin defensively, as the old per-caster path did) and enters
+     *  baking mode so light-form renderers skip re-registration during the bake.
+     *  Casters are emitted with {@link #emitCaster} and flushed by
+     *  {@link #endCasterBatch}. No-op outside a begin*()/endPass() bracket. */
+    public static void beginCasterBatch()
+    {
+        if (!inPass)
+        {
+            return;
+        }
+        RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();
+        RenderSystem.disableBlend();
+        ShadowBakeState.setBaking(true);
+    }
+
+    /** Shared per-caster wrapper around {@link ShadowCasterSource#emitOccluder}.
+     *  Owns the scratch reset and the per-caster exception + run isolation
+     *  (INVARIANT 4): the source emits one caster's depth geometry into the shared
+     *  Immediate (via {@link ImmediateOccluderBatch}); if it throws mid-build the
+     *  batch is drained here — re-asserting the light matrices (INVARIANT 1) — so
+     *  the broken caster's partial vertices can never fuse with the next caster's
+     *  into a garbage quad. The source NEVER flushes or catches its own throw. */
+    public static void emitCaster(ShadowCasterSource source, Object caster, int casterType, float tickDelta)
     {
         if (caster == null || !inPass)
         {
             return;
         }
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        Camera camera = mc.gameRenderer.getCamera();
-        VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
-        MatrixStack matrices = new MatrixStack();
-
-        // Form-renderer paths inherit GL state, so pin what we need per caster.
-        RenderSystem.depthMask(true);
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableBlend();
-
-        ShadowBakeState.setBaking(true);
+        VertexConsumerProvider.Immediate immediate = MinecraftClient.getInstance().getBufferBuilders().getEntityVertexConsumers();
+        resetScratch();
+        casterBatch.bind(immediate, scratch);
+        casterBatch.mark();
         try
         {
-            switch (casterType)
-            {
-                case CASTER_MODEL_BLOCK:
-                    drawModelBlock((ModelBlockEntity) caster, matrices, immediate, camera, tickDelta);
-                    break;
-                case CASTER_REPLAY:
-                    drawReplay((IEntity) caster, matrices, camera, tickDelta);
-                    break;
-                case CASTER_ENTITY:
-                default:
-                    drawEntity((Entity) caster, matrices, immediate, tickDelta);
-                    break;
-            }
-            immediate.draw();
+            source.emitOccluder(caster, casterType, tickDelta, casterBatch);
         }
         catch (Throwable t)
         {
-            // swallow — a single bad caster must not abort the whole bake
+            // The caster threw mid-build: terminate its run now (drain the batch,
+            // re-asserting the light matrices) so its partial geometry ends here
+            // instead of merging into the next caster's quads.
+            casterBatch.terminateRun(currentView, currentProj);
+        }
+    }
+
+    /** Close a batched caster pass: flush every buffered caster with one
+     *  immediate.draw() and leave baking mode. */
+    public static void endCasterBatch()
+    {
+        try
+        {
+            if (inPass)
+            {
+                flushCasterImmediate(MinecraftClient.getInstance().getBufferBuilders().getEntityVertexConsumers(), currentView, currentProj);
+            }
         }
         finally
         {
@@ -232,98 +272,41 @@ public final class ShadowRenderer
         }
     }
 
-    private static void drawEntity(Entity entity, MatrixStack matrices, VertexConsumerProvider.Immediate immediate, float tickDelta)
+    /** Flush the shared entity Immediate with a single draw. The batched draw
+     *  transforms its buffered (world-space) caster geometry by RenderSystem's
+     *  LIVE modelview/projection — which a caster baked earlier in the batch can
+     *  leave corrupted (a vanilla mob drawn through the EntityRenderer; the same
+     *  corruption the block/cutout paths dodge by passing matrices explicitly to
+     *  VertexBuffer.draw). The per-caster path got away without this because each
+     *  caster flushed right after applyMatrices set the state; a single end-of-
+     *  batch flush does not. So re-assert the light's view/proj first: reload the
+     *  current modelview-stack top to currentView (NO extra push — applyMatrices /
+     *  endPass own the single push/pop) and restore the light projection. */
+    /** Drain the shared entity Immediate with a single draw, re-asserting the
+     *  light's {@code view}/{@code proj} first (INVARIANT 1): the batched draw
+     *  transforms its buffered world-space caster geometry by RenderSystem's LIVE
+     *  modelview/projection, which a caster baked earlier in the batch can leave
+     *  corrupted (a vanilla mob drawn through the EntityRenderer; the same
+     *  corruption the block/cutout paths dodge by passing matrices explicitly to
+     *  VertexBuffer.draw). The per-caster path got away without this because each
+     *  caster flushed right after applyMatrices set the state; a single end-of-batch
+     *  (or recovery) flush does not. Called by {@link #endCasterBatch} (success) and
+     *  {@link ImmediateOccluderBatch#terminateRun} (per-caster recovery, INVARIANT 4). */
+    static void flushCasterImmediate(VertexConsumerProvider.Immediate immediate, Matrix4f view, Matrix4f proj)
     {
-        double cx = MathHelper.lerp(tickDelta, entity.lastRenderX, entity.getX());
-        double cy = MathHelper.lerp(tickDelta, entity.lastRenderY, entity.getY());
-        double cz = MathHelper.lerp(tickDelta, entity.lastRenderZ, entity.getZ());
-        float yaw = entity.getYaw(tickDelta);
-
-        // BBS morph first so morphed players/actors bake their visible
-        // silhouette; vanilla dispatcher is the fallback.
-        boolean rendered = false;
-        if (entity instanceof AbstractClientPlayerEntity player)
+        RenderSystem.setProjectionMatrix(proj, VertexSorter.BY_DISTANCE);
+        MatrixStack mv = RenderSystem.getModelViewStack();
+        mv.loadIdentity();
+        mv.multiplyPositionMatrix(view);
+        RenderSystem.applyModelViewMatrix();
+        try
         {
-            matrices.push();
-            matrices.translate(cx, cy, cz);
-            rendered = MorphRenderer.renderPlayer(player, yaw, tickDelta, matrices, immediate, FULL_LIGHT);
-            matrices.pop();
+            immediate.draw();
         }
-        if (!rendered && entity instanceof LivingEntity living)
+        catch (Throwable t)
         {
-            int overlay = LivingEntityRenderer.getOverlay(living, 0f);
-            matrices.push();
-            matrices.translate(cx, cy, cz);
-            rendered = MorphRenderer.renderLivingEntity(living, yaw, tickDelta, matrices, immediate, FULL_LIGHT, overlay);
-            matrices.pop();
+            // swallow — a broken buffer must not abort the whole bake
         }
-        if (!rendered)
-        {
-            EntityRenderDispatcher dispatcher = MinecraftClient.getInstance().getEntityRenderDispatcher();
-            if (dispatcher != null)
-            {
-                dispatcher.render(entity, cx, cy, cz, yaw, tickDelta, matrices, immediate, FULL_LIGHT);
-            }
-        }
-    }
-
-    private static void drawModelBlock(ModelBlockEntity mbe, MatrixStack matrices, VertexConsumerProvider.Immediate immediate, Camera camera, float tickDelta)
-    {
-        if (mbe.getProperties() == null)
-        {
-            return;
-        }
-        Form form = mbe.getProperties().getForm();
-        if (form == null)
-        {
-            return;
-        }
-        Transform t = mbe.getProperties().getTransform();
-
-        double feetX = mbe.getPos().getX() + 0.5 + (t == null ? 0 : t.translate.x);
-        double feetY = mbe.getPos().getY() + (t == null ? 0 : t.translate.y);
-        double feetZ = mbe.getPos().getZ() + 0.5 + (t == null ? 0 : t.translate.z);
-
-        matrices.push();
-        matrices.translate(feetX, feetY, feetZ);
-        if (t != null)
-        {
-            MatrixStackUtils.applyTransform(matrices, t);
-        }
-        FormRenderer<?> renderer = FormUtilsClient.getRenderer(form);
-        if (renderer != null)
-        {
-            renderer.render(new FormRenderingContext()
-                .set(FormRenderType.MODEL_BLOCK, mbe.getEntity(), matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
-                .camera(camera));
-        }
-        matrices.pop();
-    }
-
-    private static void drawReplay(IEntity stub, MatrixStack matrices, Camera camera, float tickDelta)
-    {
-        Form form = stub.getForm();
-        if (form == null)
-        {
-            return;
-        }
-
-        double fx = MathHelper.lerp(tickDelta, stub.getPrevX(), stub.getX());
-        double fy = MathHelper.lerp(tickDelta, stub.getPrevY(), stub.getY());
-        double fz = MathHelper.lerp(tickDelta, stub.getPrevZ(), stub.getZ());
-        float bodyYaw = MathHelper.lerp(tickDelta, stub.getPrevBodyYaw(), stub.getBodyYaw());
-
-        matrices.push();
-        matrices.translate(fx, fy, fz);
-        matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-bodyYaw));
-        FormRenderer<?> renderer = FormUtilsClient.getRenderer(form);
-        if (renderer != null)
-        {
-            renderer.render(new FormRenderingContext()
-                .set(FormRenderType.ENTITY, stub, matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
-                .camera(camera));
-        }
-        matrices.pop();
     }
 
     // --- Block-shadow batch draw (non-full-shape blocks within an active pass) ---
@@ -340,6 +323,32 @@ public final class ShadowRenderer
     private static final Long2ObjectOpenHashMap<VertexBuffer> blockVboById = new Long2ObjectOpenHashMap<>();
     private static final Long2ObjectOpenHashMap<List<BlockShadowEntry>> blockVboListById = new Long2ObjectOpenHashMap<>();
 
+    // --- Per-light cutout block VBO cache (T2.3), keyed by LightRegistry.id ---
+    // Cutout blocks (doors, leaves, glass panes, iron bars) were re-tessellated
+    // through brm.renderBlock on every static bake — and once PER CUBE FACE for
+    // point lights, so a point lamp paid 6x that CPU cost each bake. Capture them
+    // once into a textured VBO per render layer (CUTOUT / CUTOUT_MIPPED), keyed
+    // by id + the referentially-stable block-list instance, then redraw the VBO
+    // under that layer's own cutout shader + block atlas (alpha-discard intact)
+    // for every face / tile. Rebuilt only when the list instance changes; evicted
+    // alongside the opaque VBOs in retainBlockVbos. NOTE: the captured atlas UVs
+    // would go stale on a resource-pack reload that repacks the atlas without any
+    // block change — rare, out of the perf scope, and recovered by any later edit.
+    private static final class CutoutVbos
+    {
+        VertexBuffer cutout;        // blocks on RenderLayer.getCutout()
+        VertexBuffer cutoutMipped;  // blocks on RenderLayer.getCutoutMipped()
+
+        void close()
+        {
+            if (cutout != null) { try { cutout.close(); } catch (Throwable ignored) {} cutout = null; }
+            if (cutoutMipped != null) { try { cutoutMipped.close(); } catch (Throwable ignored) {} cutoutMipped = null; }
+        }
+    }
+
+    private static final Long2ObjectOpenHashMap<CutoutVbos> cutoutVboById = new Long2ObjectOpenHashMap<>();
+    private static final Long2ObjectOpenHashMap<List<BlockShadowEntry>> cutoutVboListById = new Long2ObjectOpenHashMap<>();
+
     /**
      * Render a light's non-full-cube blocks into the currently-bound depth FBO,
      * between a begin*()/endPass() bracket and after the entity casters. Two
@@ -355,7 +364,7 @@ public final class ShadowRenderer
         }
 
         // Cutout blocks first (their own textured pass), then opaque AABBs.
-        renderBlocksDepthCutout(blocks);
+        renderBlocksDepthCutout(id, blocks);
 
         boolean anyShape = false;
         for (int i = 0, n = blocks.size(); i < n; i++)
@@ -480,34 +489,56 @@ public final class ShadowRenderer
      *  -> empty set drains all). Run once per bake after the light loops. */
     public static void retainBlockVbos(LongSet liveIds)
     {
-        if (blockVboById.isEmpty())
+        if (!blockVboById.isEmpty())
         {
-            return;
-        }
-        ObjectIterator<Long2ObjectMap.Entry<VertexBuffer>> it = blockVboById.long2ObjectEntrySet().iterator();
-        while (it.hasNext())
-        {
-            Long2ObjectMap.Entry<VertexBuffer> me = it.next();
-            if (!liveIds.contains(me.getLongKey()))
+            ObjectIterator<Long2ObjectMap.Entry<VertexBuffer>> it = blockVboById.long2ObjectEntrySet().iterator();
+            while (it.hasNext())
             {
-                VertexBuffer vb = me.getValue();
-                if (vb != null)
+                Long2ObjectMap.Entry<VertexBuffer> me = it.next();
+                if (!liveIds.contains(me.getLongKey()))
                 {
-                    try { vb.close(); } catch (Throwable ignored) {}
+                    VertexBuffer vb = me.getValue();
+                    if (vb != null)
+                    {
+                        try { vb.close(); } catch (Throwable ignored) {}
+                    }
+                    blockVboListById.remove(me.getLongKey());
+                    it.remove();
                 }
-                blockVboListById.remove(me.getLongKey());
-                it.remove();
+            }
+        }
+
+        // Same eviction for the cutout VBOs (a lamp with only cutout blocks has
+        // no opaque VBO, so this can't be folded into the loop above).
+        if (!cutoutVboById.isEmpty())
+        {
+            ObjectIterator<Long2ObjectMap.Entry<CutoutVbos>> it = cutoutVboById.long2ObjectEntrySet().iterator();
+            while (it.hasNext())
+            {
+                Long2ObjectMap.Entry<CutoutVbos> me = it.next();
+                if (!liveIds.contains(me.getLongKey()))
+                {
+                    CutoutVbos v = me.getValue();
+                    if (v != null)
+                    {
+                        v.close();
+                    }
+                    cutoutVboListById.remove(me.getLongKey());
+                    it.remove();
+                }
             }
         }
     }
 
     // Cutout blocks bake from their textured BakedModel through vanilla's
     // alpha-test cutout shader so transparent texture pixels (door glass, iron
-    // grates, ladder gaps, leaves) let light pass through. immediate.draw binds
-    // the block atlas to Sampler0 and sets the cutout(_mipped) shader whose FS
-    // does the alpha discard; colour writes land on no attachment in our
-    // depth-only FBO, so only depth is recorded.
-    private static void renderBlocksDepthCutout(List<BlockShadowEntry> blocks)
+    // grates, ladder gaps, leaves) let light pass through. The tessellated
+    // geometry is cached per light in a VBO per render layer (T2.3) and redrawn
+    // each face / tile under that layer's cutout shader: startDrawing binds the
+    // block atlas to Sampler0 and sets the cutout(_mipped) shader whose FS does
+    // the alpha discard; colour writes land on no attachment in our depth-only
+    // FBO, so only depth is recorded.
+    private static void renderBlocksDepthCutout(long id, List<BlockShadowEntry> blocks)
     {
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientWorld world = mc.world;
@@ -537,104 +568,172 @@ public final class ShadowRenderer
             return;
         }
 
-        VertexConsumerProvider.Immediate immediate = mc.getBufferBuilders().getEntityVertexConsumers();
+        // Tessellate once per (id, list instance); reuse across all 6 cube faces
+        // / the single atlas tile and across static bakes while the list is
+        // stable (BlockShadowCache returns the same instance until a block in
+        // range changes), so a static lamp re-tessellates nothing.
+        CutoutVbos vbos = cutoutVboById.get(id);
+        if (vbos == null || cutoutVboListById.get(id) != blocks)
+        {
+            if (vbos != null)
+            {
+                vbos.close();
+            }
+            ShadowBakeState.setBaking(true);
+            try
+            {
+                vbos = buildCutoutVbos(blocks, world, brm);
+            }
+            catch (Throwable t)
+            {
+                if (!blockRenderErrorLogged)
+                {
+                    blockRenderErrorLogged = true;
+                    System.err.println("[irlite] buildCutoutVbos failed: " + t);
+                    t.printStackTrace();
+                }
+                releaseCutoutVbos(id);
+                return;
+            }
+            finally
+            {
+                ShadowBakeState.setBaking(false);
+            }
+            cutoutVboById.put(id, vbos);
+            cutoutVboListById.put(id, blocks);
+        }
 
-        ShadowBakeState.setBaking(true);
-        MatrixStack mv = RenderSystem.getModelViewStack();
-        boolean mvPushed = false;
+        // Redraw the cached VBOs. vb.draw is handed the LIGHT's own view/proj
+        // explicitly, so — unlike the old immediate.draw path — it never reads
+        // RenderSystem's live modelview, which a vanilla-mob caster baked earlier
+        // in this pass can leave corrupted (that was the original "a second cutout
+        // layer makes the others' shadows vanish" bug; gone here by construction).
         try
         {
-            RenderSystem.depthMask(true);
-            RenderSystem.enableDepthTest();
-            RenderSystem.disableBlend();
-
-            // Establish the LIGHT's own view/proj BEFORE the collection loop, not
-            // just before the final immediate.draw(). Cutout blocks of different
-            // RenderLayers (a door/trapdoor on CUTOUT; leaves/glass/bars on
-            // CUTOUT_MIPPED) all share the Immediate's fallback BufferBuilder, so
-            // requesting a buffer for a NEW layer auto-flushes the PREVIOUS layer
-            // mid-loop. That flush reads RenderSystem's live matrices — which a
-            // vanilla-mob caster baked earlier in this pass leaves corrupted — so
-            // with the matrices fixed only after the loop, every cutout layer but
-            // the last drew into nowhere and its shadows vanished the moment a
-            // second cutout layer was present (one layer alone always worked, hence
-            // "remove the trapdoor and the leaf/glass shadows come back"). Setting
-            // them first makes both the mid-loop auto-flushes and the final draw
-            // land in the depth map. mvPushed + the finally keep the stack balanced.
-            mv.push();
-            mvPushed = true;
-            mv.loadIdentity();
-            mv.multiplyPositionMatrix(currentView);
-            RenderSystem.applyModelViewMatrix();
-            RenderSystem.setProjectionMatrix(currentProj, VertexSorter.BY_DISTANCE);
-
-            MatrixStack stack = new MatrixStack();
-            for (int i = 0, n = blocks.size(); i < n; i++)
-            {
-                BlockShadowEntry entry = blocks.get(i);
-                if (entry == null || !entry.cutout)
-                {
-                    continue;
-                }
-                BlockPos p = entry.pos;
-                BlockState state = world.getBlockState(p);
-                if (state.isAir())
-                {
-                    continue;
-                }
-
-                RenderLayer layer;
-                try
-                {
-                    layer = RenderLayers.getBlockLayer(state);
-                }
-                catch (Throwable t)
-                {
-                    continue;
-                }
-                if (layer != RenderLayer.getCutout() && layer != RenderLayer.getCutoutMipped())
-                {
-                    continue;
-                }
-
-                VertexConsumer consumer = immediate.getBuffer(layer);
-                stack.push();
-                stack.translate(p.getX(), p.getY(), p.getZ());
-                cutoutRandom.setSeed(state.getRenderingSeed(p));
-                try
-                {
-                    brm.renderBlock(state, p, world, stack, consumer, true, cutoutRandom);
-                }
-                catch (Throwable t)
-                {
-                    // skip a single broken block, keep baking the rest
-                }
-                stack.pop();
-            }
-            // Flush the final layer. The mid-loop auto-flushes (on each layer
-            // switch, see the note above) and this one all run with the light's
-            // matrices that were set before the loop, so every cutout layer lands
-            // in the depth map regardless of what a caster left on RenderSystem.
-            immediate.draw();
+            drawCutoutVbo(RenderLayer.getCutout(), vbos.cutout);
+            drawCutoutVbo(RenderLayer.getCutoutMipped(), vbos.cutoutMipped);
         }
         catch (Throwable t)
         {
             if (!blockRenderErrorLogged)
             {
                 blockRenderErrorLogged = true;
-                System.err.println("[irlite] renderBlocksDepthCutout failed: " + t);
+                System.err.println("[irlite] drawCutoutVbo failed: " + t);
                 t.printStackTrace();
             }
         }
+    }
+
+    /** Tessellate a light's cutout blocks into one STATIC textured VBO per
+     *  cutout render layer (CUTOUT / CUTOUT_MIPPED). */
+    private static CutoutVbos buildCutoutVbos(List<BlockShadowEntry> blocks, ClientWorld world, BlockRenderManager brm)
+    {
+        CutoutVbos out = new CutoutVbos();
+        out.cutout = buildCutoutLayerVbo(blocks, world, brm, RenderLayer.getCutout());
+        out.cutoutMipped = buildCutoutLayerVbo(blocks, world, brm, RenderLayer.getCutoutMipped());
+        return out;
+    }
+
+    /** Tessellate the cutout blocks that map to ONE render layer into a STATIC
+     *  VBO in that layer's textured vertex format, exactly as the old immediate
+     *  path did (cull on, per-block render seed). Returns null if no block maps
+     *  to this layer or they all tessellate to nothing (e.g. fully neighbour-
+     *  culled), so the redraw skips a missing layer. */
+    private static VertexBuffer buildCutoutLayerVbo(List<BlockShadowEntry> blocks, ClientWorld world, BlockRenderManager brm, RenderLayer layer)
+    {
+        Tessellator tess = Tessellator.getInstance();
+        BufferBuilder buf = tess.getBuffer();
+        buf.begin(layer.getDrawMode(), layer.getVertexFormat());
+
+        resetScratch();
+        MatrixStack stack = scratch;
+        for (int i = 0, n = blocks.size(); i < n; i++)
+        {
+            BlockShadowEntry entry = blocks.get(i);
+            if (entry == null || !entry.cutout)
+            {
+                continue;
+            }
+            BlockPos p = entry.pos;
+            BlockState state = world.getBlockState(p);
+            if (state.isAir())
+            {
+                continue;
+            }
+
+            RenderLayer bl;
+            try
+            {
+                bl = RenderLayers.getBlockLayer(state);
+            }
+            catch (Throwable t)
+            {
+                continue;
+            }
+            if (bl != layer)
+            {
+                continue;
+            }
+
+            stack.push();
+            stack.translate(p.getX(), p.getY(), p.getZ());
+            cutoutRandom.setSeed(state.getRenderingSeed(p));
+            try
+            {
+                brm.renderBlock(state, p, world, stack, buf, true, cutoutRandom);
+            }
+            catch (Throwable t)
+            {
+                // skip a single broken block, keep tessellating the rest
+            }
+            stack.pop();
+        }
+
+        BufferBuilder.BuiltBuffer built = buf.endNullable();
+        if (built == null)
+        {
+            return null; // nothing emitted for this layer
+        }
+        VertexBuffer vb = new VertexBuffer(VertexBuffer.Usage.STATIC);
+        vb.bind();
+        vb.upload(built);
+        VertexBuffer.unbind();
+        return vb;
+    }
+
+    /** Draw one cached cutout layer VBO under that layer's render state.
+     *  startDrawing/endDrawing replicate exactly what immediate.draw uses for
+     *  the layer — cutout shader, block atlas on Sampler0, blend off, cull on —
+     *  so transparent texels still discard; only the light's own view/proj reach
+     *  the shader (corruption-proof). The depth-only FBO drops the colour writes. */
+    private static void drawCutoutVbo(RenderLayer layer, VertexBuffer vb)
+    {
+        if (vb == null)
+        {
+            return;
+        }
+        layer.startDrawing();
+        try
+        {
+            vb.bind();
+            vb.draw(currentView, currentProj, RenderSystem.getShader());
+            VertexBuffer.unbind();
+        }
         finally
         {
-            if (mvPushed)
-            {
-                mv.pop();
-                RenderSystem.applyModelViewMatrix();
-            }
-            ShadowBakeState.setBaking(false);
+            layer.endDrawing();
         }
+    }
+
+    /** Free one lamp's cached cutout VBOs. */
+    private static void releaseCutoutVbos(long id)
+    {
+        CutoutVbos v = cutoutVboById.remove(id);
+        if (v != null)
+        {
+            v.close();
+        }
+        cutoutVboListById.remove(id);
     }
 
     /**
@@ -777,6 +876,18 @@ public final class ShadowRenderer
 
     private static Vector3f pickStableUp(float dy)
     {
-        return Math.abs(dy) > 0.99f ? new Vector3f(0f, 0f, 1f) : new Vector3f(0f, 1f, 0f);
+        return Math.abs(dy) > 0.99f ? UP_Z : UP_Y;
+    }
+
+    /** Drain the shared {@link #scratch} back to its single root entry (popping
+     *  anything a thrown caster left pushed — {@code isEmpty()} is true at size
+     *  1) and reset that entry to identity, so each use starts clean. */
+    private static void resetScratch()
+    {
+        while (!scratch.isEmpty())
+        {
+            scratch.pop();
+        }
+        scratch.loadIdentity();
     }
 }

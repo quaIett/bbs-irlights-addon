@@ -27,6 +27,7 @@ public class BBSSettingsMixin
         IrliteConfig.shadowCache = builder.getBoolean("shadow_cache", true);
         IrliteConfig.shadowBlocks = builder.getBoolean("shadow_blocks", true);
         IrliteConfig.shadowBlockRadius = builder.getInt("shadow_block_radius", 24, 4, 96);
+        IrliteConfig.shadowBakeBudget = builder.getInt("shadow_bake_budget", 4, 0, 16);
 
         // Separate section for the shader patcher (UI injected by
         // UISettingsOverlayPanelMixin). Empty category — buildSections still

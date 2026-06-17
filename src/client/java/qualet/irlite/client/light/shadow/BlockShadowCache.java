@@ -49,6 +49,11 @@ public final class BlockShadowCache
         long hash;
         List<BlockShadowEntry> list;
         long[] sectionKeys;
+        /** Snapped collection center + padded radius this list was collected
+         *  with (the same cx/cy/cz/cr getOrCompute fed the collector). Lets
+         *  invalidateAt reject an edit that lies outside the actual sphere, in a
+         *  far corner of a section the coarse index merely touched. */
+        float cx, cy, cz, cr;
     }
 
     private static final Long2ObjectOpenHashMap<CacheEntry> byId = new Long2ObjectOpenHashMap<>();
@@ -100,6 +105,10 @@ public final class BlockShadowCache
         }
         e.list = fresh;
         e.hash = h;
+        e.cx = cx;
+        e.cy = cy;
+        e.cz = cz;
+        e.cr = cr;
         rebuildSectionIndex(id, e, cx, cy, cz, cr);
         return fresh;
     }
@@ -118,15 +127,31 @@ public final class BlockShadowCache
         {
             return false;
         }
+        // Block CENTER, matching BlockShadowCollector's per-block keep test
+        // (it keeps blocks whose center is within the snapped radius).
+        float bx = pos.getX() + 0.5f;
+        float by = pos.getY() + 0.5f;
+        float bz = pos.getZ() + 0.5f;
         boolean any = false;
         for (LongIterator it = ids.iterator(); it.hasNext(); )
         {
             CacheEntry e = byId.get(it.nextLong());
-            if (e != null)
+            if (e == null)
             {
-                e.hash = EMPTY;
-                any = true;
+                continue;
             }
+            // The section index is a coarse 16^3 pre-filter: an edit in a far
+            // corner of a touched section can still lie outside this lamp's
+            // collection sphere, where it casts no shadow into the lamp's map.
+            // Reject those with the exact center+radius test the collector used,
+            // so such an edit doesn't needlessly re-walk the lamp's bbox.
+            float dx = bx - e.cx, dy = by - e.cy, dz = bz - e.cz;
+            if (dx * dx + dy * dy + dz * dz > e.cr * e.cr)
+            {
+                continue;
+            }
+            e.hash = EMPTY;
+            any = true;
         }
         return any;
     }

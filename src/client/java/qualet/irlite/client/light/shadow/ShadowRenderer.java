@@ -242,6 +242,17 @@ public final class ShadowRenderer
         resetScratch();
         casterBatch.bind(immediate, scratch);
         casterBatch.mark();
+        // INVARIANT 1 hardening (MAJOR-A): some caster forms self-draw SYNCHRONOUSLY
+        // inside emitOccluder (BBS ModelForm via glDrawArrays; MobForm leaves the live
+        // modelview at identity), reading the LIVE RenderSystem modelview AT EMIT TIME —
+        // before the end-of-batch flush re-establishes it. A form emitted after a
+        // modelview-corrupting caster would otherwise draw through a garbage transform
+        // and cast a wrong/absent shadow (no GL error). Re-assert the clean light
+        // view/proj before EVERY emit so each self-drawing form starts from the light
+        // modelview. Harmless/idempotent for the buffered path (its draws ride the
+        // scratch MatrixStack until the single end-of-batch flush, which re-asserts the
+        // same matrices). See irl-core/docs/shadow-caster-seam-spec.md INV-1 erratum.
+        establishLightMatrices(currentView, currentProj);
         try
         {
             source.emitOccluder(caster, casterType, tickDelta, casterBatch);
@@ -272,16 +283,6 @@ public final class ShadowRenderer
         }
     }
 
-    /** Flush the shared entity Immediate with a single draw. The batched draw
-     *  transforms its buffered (world-space) caster geometry by RenderSystem's
-     *  LIVE modelview/projection — which a caster baked earlier in the batch can
-     *  leave corrupted (a vanilla mob drawn through the EntityRenderer; the same
-     *  corruption the block/cutout paths dodge by passing matrices explicitly to
-     *  VertexBuffer.draw). The per-caster path got away without this because each
-     *  caster flushed right after applyMatrices set the state; a single end-of-
-     *  batch flush does not. So re-assert the light's view/proj first: reload the
-     *  current modelview-stack top to currentView (NO extra push — applyMatrices /
-     *  endPass own the single push/pop) and restore the light projection. */
     /** Drain the shared entity Immediate with a single draw, re-asserting the
      *  light's {@code view}/{@code proj} first (INVARIANT 1): the batched draw
      *  transforms its buffered world-space caster geometry by RenderSystem's LIVE
@@ -294,11 +295,7 @@ public final class ShadowRenderer
      *  {@link ImmediateOccluderBatch#terminateRun} (per-caster recovery, INVARIANT 4). */
     static void flushCasterImmediate(VertexConsumerProvider.Immediate immediate, Matrix4f view, Matrix4f proj)
     {
-        RenderSystem.setProjectionMatrix(proj, VertexSorter.BY_DISTANCE);
-        MatrixStack mv = RenderSystem.getModelViewStack();
-        mv.loadIdentity();
-        mv.multiplyPositionMatrix(view);
-        RenderSystem.applyModelViewMatrix();
+        establishLightMatrices(view, proj);
         try
         {
             immediate.draw();
@@ -307,6 +304,22 @@ public final class ShadowRenderer
         {
             // swallow — a broken buffer must not abort the whole bake
         }
+    }
+
+    /** Re-assert the light's {@code view}/{@code proj} onto the live RenderSystem
+     *  projection + modelview stack: reload the modelview-stack top to {@code view}
+     *  (NO extra push — applyMatrices / endPass own the single push/pop) and restore
+     *  the light projection. The shared matrix prologue used by
+     *  {@link #flushCasterImmediate} (immediately before the batched draw, INVARIANT 1
+     *  CLAUSE 1) and by {@link #emitCaster} (before each emitOccluder — the MAJOR-A
+     *  hardening for forms that self-draw against the live modelview at emit time). */
+    static void establishLightMatrices(Matrix4f view, Matrix4f proj)
+    {
+        RenderSystem.setProjectionMatrix(proj, VertexSorter.BY_DISTANCE);
+        MatrixStack mv = RenderSystem.getModelViewStack();
+        mv.loadIdentity();
+        mv.multiplyPositionMatrix(view);
+        RenderSystem.applyModelViewMatrix();
     }
 
     // --- Block-shadow batch draw (non-full-shape blocks within an active pass) ---

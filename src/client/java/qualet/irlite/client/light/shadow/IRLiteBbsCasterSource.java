@@ -80,6 +80,12 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     private static final long FNV_OFFSET = 1469598103934665603L;
     private static final long FNV_PRIME = 1099511628211L;
 
+    /** Mirror of {@code ShadowBaker.OVERLAP_MARGIN} (private there). The model-block
+     *  arm computes its bounding sphere by hand and emits via the raw
+     *  {@link OccluderSink#emit} escape, which (unlike {@code emitFromBox}) does NOT
+     *  add the cull slack — so add it here to match the entity/replay arms. Keep in sync. */
+    private static final float OVERLAP_MARGIN = 0.5f;
+
     // ===================================================================== //
     //  collect — WHAT casts (entity -> model-block -> replay; arm order is    //
     //  load-bearing for deterministic over-cap drops, INVARIANT 6).          //
@@ -182,40 +188,7 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
                 continue;
             }
             Transform t = props.getTransform();
-
-            // Caster CENTER (feet + translate): feet Y carries NO +0.5; X/Z get
-            // the block center +0.5. emitFromBox raises Y to the box mid-height.
-            double wx = pos.getX() + 0.5 + (t == null ? 0 : t.translate.x);
-            double wy = pos.getY() + (t == null ? 0 : t.translate.y);
-            double wz = pos.getZ() + 0.5 + (t == null ? 0 : t.translate.z);
-
-            // INVARIANT 5: build a rotation-EXPANDED, anisotropically-scaled AABB
-            // enclosing the post-scale/post-rotate geometry, with the feet at
-            // box minY. The full scale + rotation is baked into the box edge
-            // lengths so emitFromBox derives the true circumscribing diagonal
-            // (we pass scale=1f to avoid double-scaling; a single uniform scale
-            // param cannot represent anisotropic scale anyway).
-            Box box = rotationExpandedBox(form, t);
-
-            // INVARIANT 2 (CONSERVATIVE, LOCKED): mark ALL model blocks dynamic.
-            // An animated model block left isStatic=true would FREEZE its shadow
-            // at the first pose; isStatic=false is guaranteed-correct.
-            // TODO(Ф3 perf-debt, Open Q1): mark genuinely-static model-blocks
-            // isStatic=true once a safe BBS animation probe is confirmed — see
-            // shadow-phase3-port-plan.md §8.
-            boolean isStatic = false;
-
-            // INVARIANT 3: modelBlockHash supplies per-caster CONTENT only (full
-            // avalanche over form identity + center incl. translate + scale +
-            // rotate). The order-independent cross-caster avalanche+count FOLD
-            // lives in the shared ShadowBaker; we must NOT fold here. Non-static
-            // casters supply EXACTLY 0L. occType stays MODEL_BLOCK regardless of
-            // isStatic (independent axes).
-            long staticHash = isStatic
-                ? modelBlockHash((float) wx, (float) wy, (float) wz, t, System.identityHashCode(form))
-                : 0L;
-
-            sink.emitFromBox(mbe, CasterType.MODEL_BLOCK, isStatic, wx, wy, wz, box, 1f, staticHash);
+            emitModelBlock(sink, mbe, form, t);
         }
     }
 
@@ -335,61 +308,94 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     }
 
     /**
-     * Rotation-expanded, anisotropically-scaled AABB enclosing a model block's
-     * post-transform geometry, with the feet at {@code minY} (so emitFromBox can
-     * raise the sphere center to box mid-height). The form's local box is
-     * {@code [hbW × hbH × hbW]} (feet at 0); scale is applied per-axis, then the
-     * box is expanded by the {@link Transform#rotate} euler rotation (ZYX, radians,
-     * matching {@link MatrixStackUtils#applyTransform}) via the abs-rotation-matrix
-     * AABB expansion (INVARIANT 5: under-bounding silently drops casters from the cone cull).
+     * INVARIANT 5: append a model block's occluder with a bounding sphere that
+     * CIRCUMSCRIBES the geometry exactly as {@link #drawModelBlock} draws it.
      *
-     * <p>NOTE (Ф3 audit, fast-follow): this expands about the box CENTER, but
-     * {@link MatrixStackUtils#applyTransform} rotates about the FEET pivot, which
-     * displaces tall geometry the center-anchored sphere does not capture. It is a
-     * safe over-bound for upright / body-yaw forms (the common case) but can slightly
-     * UNDER-bound a tall model block tilted off-vertical (rotate.x/z ≳ 45–60°) near a
-     * cull boundary — see shadow-phase3-port-plan.md §8 / shadow-phase3-audit-verdict.md
-     * MAJOR-B. Correct fix: rotate the 8 feet-relative corners about the feet origin
-     * and bound that AABB (emit() with a hand-computed sphere).
+     * <p>The draw moves to the feet (block center + {@code t.translate}), then
+     * {@link MatrixStackUtils#applyTransform} translates AGAIN by {@code t.translate},
+     * rotates ({@code Rz·Ry·Rx}, {@link Transform#createRotationMatrix}) and scales.
+     * So the true rotation pivot is {@code feet + t.translate} (= block center +
+     * 2×translate) and the scaled local box {@code [−hx,hx]×[0,2hy]×[−hz,hz]} (feet at
+     * y=0, centered in x/z) is rotated about it. The minimal circumscribing sphere of
+     * that rotated box is centered at {@code pivot + R·(0,hy,0)} — the box center
+     * carried through the FEET-pivot rotation — with radius {@code |(ehx,ehy,ehz)|}
+     * (the abs-rotation-expanded half-extents; the radius is pivot-independent).
+     *
+     * <p>This replaces the old {@code rotationExpandedBox}+{@code emitFromBox} path,
+     * which anchored the sphere about the box CENTER at a SINGLE translate, so it
+     * UNDER-bounded a tall block tilted off-vertical (rotate.x/z) or displaced by a
+     * non-zero {@code t.translate} and silently dropped it near a cull boundary (Ф3
+     * audit MAJOR-B + the 1×-vs-2×-translate gap). Uses the raw {@link OccluderSink#emit}
+     * escape because the sphere is neither feet-centered nor x/z-symmetric, so
+     * {@code emitFromBox} cannot express it. INVARIANT 2/3 unchanged (all dynamic, 0L).
      */
-    private static Box rotationExpandedBox(Form form, Transform t)
+    private static void emitModelBlock(OccluderSink sink, ModelBlockEntity mbe, Form form, Transform t)
     {
         float hbW = Math.max(0.1f, form.hitboxWidth.get());
         float hbH = Math.max(0.1f, form.hitboxHeight.get());
 
-        // Local half-extents (unscaled): width/depth half = hbW/2, height half = hbH/2.
-        float lhx = hbW * 0.5f;
-        float lhy = hbH * 0.5f;
-        float lhz = hbW * 0.5f;
-
-        // Anisotropic scale.
+        // Scaled local half-extents (feet at y=0, centered in x/z); the box center is
+        // (0, hy, 0) relative to the feet.
         float sx = t == null ? 1f : Math.max(0.001f, Math.abs(t.scale.x));
         float sy = t == null ? 1f : Math.max(0.001f, Math.abs(t.scale.y));
         float sz = t == null ? 1f : Math.max(0.001f, Math.abs(t.scale.z));
-        float hx = lhx * sx;
-        float hy = lhy * sy;
-        float hz = lhz * sz;
+        float hx = hbW * 0.5f * sx;
+        float hy = hbH * 0.5f * sy;
+        float hz = hbW * 0.5f * sz;
 
+        BlockPos pos = mbe.getPos();
+        double tx = t == null ? 0 : t.translate.x;
+        double ty = t == null ? 0 : t.translate.y;
+        double tz = t == null ? 0 : t.translate.z;
+        // Pivot = feet + t.translate; drawModelBlock folds one translate into the feet
+        // and applyTransform applies it AGAIN => block center + 2×translate.
+        double pivotX = pos.getX() + 0.5 + 2.0 * tx;
+        double pivotY = pos.getY() + 2.0 * ty;
+        double pivotZ = pos.getZ() + 0.5 + 2.0 * tz;
+
+        float ehx, ehy, ehz;       // abs-rotation-expanded half-extents (radius source)
+        double offX, offY, offZ;   // box center carried through the pivot rotation: R·(0,hy,0)
         if (t == null)
         {
-            // No rotation: feet at minY (= center - hy raised back to 0).
-            return new Box(-hx, 0, -hz, hx, 2f * hy, hz);
+            ehx = hx; ehy = hy; ehz = hz;
+            offX = 0.0; offY = hy; offZ = 0.0;
+        }
+        else
+        {
+            // R = Rz·Ry·Rx (createRotationMatrix), identical to applyTransform's order.
+            Matrix3f rot = t.createRotationMatrix();
+            // half-extent in world axis i = Σ_j |M[i][j]| · h[j]; JOML Matrix3f is
+            // column-major (m<col><row>), so the world-axis-i row is (m0i, m1i, m2i).
+            ehx = Math.abs(rot.m00) * hx + Math.abs(rot.m10) * hy + Math.abs(rot.m20) * hz;
+            ehy = Math.abs(rot.m01) * hx + Math.abs(rot.m11) * hy + Math.abs(rot.m21) * hz;
+            ehz = Math.abs(rot.m02) * hx + Math.abs(rot.m12) * hy + Math.abs(rot.m22) * hz;
+            // R·(0,hy,0) = hy · (column Y) = hy·(m10, m11, m12).
+            offX = rot.m10 * hy; offY = rot.m11 * hy; offZ = rot.m12 * hy;
         }
 
-        // Rotation matrix (ZYX order, radians) — BBS's own helper, identical to
-        // MatrixStackUtils.applyTransform's rotation order.
-        Matrix3f rot = t.createRotationMatrix();
+        double cx = pivotX + offX;
+        double cy = pivotY + offY;
+        double cz = pivotZ + offZ;
+        // Minimal circumscribing radius = half the rotated box's diagonal =
+        // |(ehx,ehy,ehz)|, + OVERLAP_MARGIN slack (emitFromBox adds the same margin for
+        // the entity/replay arms; the raw emit() does not, so mirror it here).
+        float radius = (float) Math.sqrt((double) ehx * ehx + (double) ehy * ehy + (double) ehz * ehz) + OVERLAP_MARGIN;
 
-        // AABB expansion: new half-extent in axis i = Σ_j |M[i][j]| * h[j].
-        // JOML Matrix3f is column-major: mXY = column X, row Y. The world-axis i
-        // row is (m0i, m1i, m2i).
-        float ehx = Math.abs(rot.m00) * hx + Math.abs(rot.m10) * hy + Math.abs(rot.m20) * hz;
-        float ehy = Math.abs(rot.m01) * hx + Math.abs(rot.m11) * hy + Math.abs(rot.m21) * hz;
-        float ehz = Math.abs(rot.m02) * hx + Math.abs(rot.m12) * hy + Math.abs(rot.m22) * hz;
+        // INVARIANT 2 (CONSERVATIVE, LOCKED): mark ALL model blocks dynamic. An
+        // animated model block left isStatic=true would FREEZE its shadow at the first
+        // pose; isStatic=false is guaranteed-correct. occType stays MODEL_BLOCK
+        // regardless of isStatic (independent axes).
+        // TODO(Ф3 perf-debt, Open Q1): mark genuinely-static model-blocks isStatic=true
+        // once a safe BBS animation probe is confirmed — see shadow-phase3-port-plan.md §8.
+        boolean isStatic = false;
+        // INVARIANT 3: per-caster CONTENT only (the order-independent cross-caster
+        // avalanche+count fold lives in the shared ShadowBaker). Non-static casters
+        // supply EXACTLY 0L; dead today (isStatic hardcoded false).
+        long staticHash = isStatic
+            ? modelBlockHash((float) cx, (float) cy, (float) cz, t, System.identityHashCode(form))
+            : 0L;
 
-        // Feet at minY: box spans [-ehx, 0, -ehz] .. [ehx, 2*ehy, ehz], so its
-        // height is 2*ehy and emitFromBox raises the center by ehy.
-        return new Box(-ehx, 0, -ehz, ehx, 2f * ehy, ehz);
+        sink.emit(mbe, CasterType.MODEL_BLOCK, isStatic, (float) cx, (float) cy, (float) cz, radius, staticHash);
     }
 
     /** Static-occluder signature for a model block: which form it shows plus its

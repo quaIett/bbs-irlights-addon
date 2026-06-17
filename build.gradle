@@ -14,7 +14,7 @@ def mcVersions = [
         minecraft: '1.20.1',
         yarn     : '1.20.1+build.10',
         fabricApi: '0.92.9+1.20.1',
-        bbsJar   : 'libs/bbs-2.2-dev3-1.20.1.jar',
+        bbsJar   : 'libs/bbs-2.2.1-1.20.1.jar',
         sodium   : 'mc1.20.1-0.5.11',
         iris     : '1.7.2+1.20.1',
         lwjglPin : '3.3.1',
@@ -23,7 +23,7 @@ def mcVersions = [
         minecraft: '1.20.4',
         yarn     : '1.20.4+build.1',
         fabricApi: '0.91.1+1.20.4',
-        bbsJar   : 'libs/bbs-2.2-1.20.4.jar',
+        bbsJar   : 'libs/bbs-2.2.1-1.20.4.jar',
         sodium   : 'mc1.20.4-0.5.8',
         iris     : '1.7.2+1.20.4',
         lwjglPin : null,
@@ -99,6 +99,12 @@ dependencies {
 
     modImplementation files(V.bbsJar)
 
+    // --- Shared BBS-free engine: light SSBO + .irlights patcher (irl-core) ---
+    // Plain Java lib via Gradle composite build (settings.gradle includeBuild),
+    // bundled into the mod jar with Loom's `include` (synthesizes a stub fabric.mod.json).
+    clientImplementation "org.qualet:irl-core:1.0.0"
+    include "org.qualet:irl-core:1.0.0"
+
     // Iris is referenced at compile time (sampler mixins). Sodium is runtime-only.
     modImplementation "maven.modrinth:iris:${V.iris}"
     modRuntimeOnly "maven.modrinth:sodium:${V.sodium}"
@@ -119,6 +125,10 @@ processResources {
                 "minecraft_version": project.minecraft_version,
                 "loader_version": project.loader_version
     }
+
+    // Embed the canonical .irlights (source of truth = patches/) so BbsPatcherHost
+    // auto-extracts them on first use (matches the redactor's bundled model).
+    from("patches") { into "assets/irlite/patches" }
 }
 
 def targetJavaVersion = 17

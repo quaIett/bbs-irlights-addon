@@ -31,7 +31,7 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.chunk.BlockEntityTickInvoker;
 import qualet.irlite.IrliteConfig;
-import qualet.irlite.client.light.LightRegistry;
+import org.qualet.irl.light.LightRegistry;
 import qualet.irlite.mixin.client.bbs.FilmsAccessor;
 import qualet.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
 
@@ -1332,7 +1332,8 @@ public final class ShadowBaker
         {
             h = mix(h, t.scale.x); h = mix(h, t.scale.y); h = mix(h, t.scale.z);
             h = mix(h, t.rotate.x); h = mix(h, t.rotate.y); h = mix(h, t.rotate.z);
-            h = mix(h, t.rotate2.x); h = mix(h, t.rotate2.y); h = mix(h, t.rotate2.z);
+            // BBS 2.2.1 removed Transform.rotate2 — the legacy second rotation now
+            // folds into the single `rotate`, so hashing `rotate` alone is sufficient.
         }
         return h;
     }

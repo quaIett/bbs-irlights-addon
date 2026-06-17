@@ -10,7 +10,7 @@ import org.joml.Matrix4f;
 import org.joml.Vector3d;
 import org.joml.Vector4f;
 import qualet.irlite.client.light.IRLightPositionResolver;
-import qualet.irlite.client.light.LightRegistry;
+import org.qualet.irl.light.LightRegistry;
 import qualet.irlite.forms.SpotlightForm;
 
 public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightForm>

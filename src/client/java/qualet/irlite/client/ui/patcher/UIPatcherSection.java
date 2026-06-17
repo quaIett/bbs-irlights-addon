@@ -13,12 +13,12 @@ import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Colors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qualet.irlite.client.patcher.IrlPatch;
-import qualet.irlite.client.patcher.IrlPatchApplier;
-import qualet.irlite.client.patcher.IrlPatchParser;
-import qualet.irlite.client.patcher.PatchLibrary;
-import qualet.irlite.client.patcher.PatchResult;
-import qualet.irlite.client.patcher.Shaderpacks;
+import org.qualet.irl.patcher.IrlPatch;
+import org.qualet.irl.patcher.IrlPatchApplier;
+import org.qualet.irl.patcher.IrlPatchParser;
+import org.qualet.irl.patcher.PatchLibrary;
+import org.qualet.irl.patcher.PatchResult;
+import org.qualet.irl.patcher.Shaderpacks;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

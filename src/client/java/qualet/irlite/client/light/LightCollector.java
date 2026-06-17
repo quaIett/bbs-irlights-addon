@@ -29,6 +29,8 @@ import qualet.irlite.forms.PointLightForm;
 import qualet.irlite.forms.SpotlightForm;
 import qualet.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
 
+import org.qualet.irl.light.LightRegistry;
+
 import java.util.List;
 
 /**

@@ -20,11 +20,15 @@ public final class IRLightPositionResolver
 
     public static Vector3d resolve(FormRenderingContext context)
     {
-        Matrix4f matrix = new Matrix4f((Matrix3fc) RenderSystem.getInverseViewRotationMatrix());
+        net.minecraft.client.render.Camera camera = MinecraftClient.getInstance().gameRenderer.getCamera();
+        // 1.21: RenderSystem.getInverseViewRotationMatrix() is gone — rebuild the
+        // inverse view rotation from the camera orientation (incl. BBS roll), exactly
+        // as BBS itself does (new Matrix3f().rotation(camera.getRotation())).
+        Matrix4f matrix = new Matrix4f(new org.joml.Matrix3f().rotation(camera.getRotation()));
         matrix.mul(context.stack.peek().getPositionMatrix());
         Vector3f offset = matrix.getTranslation(new Vector3f());
 
-        net.minecraft.util.math.Vec3d cam = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
+        net.minecraft.util.math.Vec3d cam = camera.getPos();
 
         return new Vector3d(cam.x + offset.x, cam.y + offset.y, cam.z + offset.z);
     }

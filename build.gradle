@@ -3,13 +3,23 @@ plugins {
     id 'maven-publish'
 }
 
-// --- Multi-version dev profile selector (-Pmc=1.20.1 | 1.20.4) ---
+// --- Multi-version dev profile selector (-Pmc=1.21.1 | 1.20.4 | 1.20.1) ---
 // Picks Minecraft / yarn / Fabric API / BBS jar / Iris / Sodium coordinates for
-// the target version. The PRODUCT jar is built against 1.20.1 (lower version =
-// most stable intermediary names "upward"); 1.20.4 is used to dev-test the
-// 1.20.4 path. The compiled jar is universal across the depends range either way.
-def mcTarget = (project.findProperty('mc') ?: '1.20.1').toString()
+// the target version. This branch (port/1.21.1) defaults to and is built for
+// MC 1.21.1 (Java 21) — the FINAL addon-supported MC version. The 1.20.x entries
+// stay for reference; they require Java 17 (gated by targetJavaVersion below).
+def mcTarget = (project.findProperty('mc') ?: '1.21.1').toString()
 def mcVersions = [
+    '1.21.1': [
+        minecraft: '1.21.1',
+        yarn     : '1.21.1+build.3',
+        fabricApi: '0.116.12+1.21.1',
+        bbsJar   : 'libs/bbs-2.2.1-1.21.1.jar',
+        // Iris 1.8.8 keeps the 2-arg addDynamicSampler (4-arg arrives in 1.9+/1.10.7).
+        sodium   : 'mc1.21.1-0.6.13-fabric',
+        iris     : '1.8.8+1.21.1-fabric',
+        lwjglPin : null,
+    ],
     '1.20.1': [
         minecraft: '1.20.1',
         yarn     : '1.20.1+build.10',
@@ -30,7 +40,7 @@ def mcVersions = [
     ],
 ]
 if (!mcVersions.containsKey(mcTarget)) {
-    throw new GradleException("Unknown -Pmc=${mcTarget}; expected 1.20.1 or 1.20.4")
+    throw new GradleException("Unknown -Pmc=${mcTarget}; expected 1.21.1, 1.20.4 or 1.20.1")
 }
 def V = mcVersions[mcTarget]
 logger.lifecycle("IRLite build target: Minecraft ${V.minecraft} (yarn ${V.yarn})")
@@ -131,7 +141,8 @@ processResources {
     from("patches") { into "assets/irlite/patches" }
 }
 
-def targetJavaVersion = 17
+// 1.21.1 is Java 21 (since 1.20.5); the 1.20.x reference profiles stay on 17.
+def targetJavaVersion = (mcTarget == '1.21.1') ? 21 : 17
 tasks.withType(JavaCompile).configureEach {
     // ensure that the encoding is set to UTF-8, no matter what the system default is
     // this fixes some edge cases with special characters not displaying correctly

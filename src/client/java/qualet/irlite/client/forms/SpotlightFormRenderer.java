@@ -45,7 +45,9 @@ public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightFo
 
         // Direction: local +Z through inverseViewRot * stack.peek (strips view roll),
         // matching the editor gizmo convention.
-        Matrix4f matrix = new Matrix4f((Matrix3fc) RenderSystem.getInverseViewRotationMatrix());
+        // 1.21: getInverseViewRotationMatrix() removed -> rebuild from camera orientation.
+        Matrix4f matrix = new Matrix4f(new org.joml.Matrix3f().rotation(
+            net.minecraft.client.MinecraftClient.getInstance().gameRenderer.getCamera().getRotation()));
         matrix.mul(context.stack.peek().getPositionMatrix());
         Vector4f forward = new Vector4f(0F, 0F, 1F, 0F);
         matrix.transform(forward);

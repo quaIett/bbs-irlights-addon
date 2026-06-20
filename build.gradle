@@ -112,8 +112,8 @@ dependencies {
     // --- Shared BBS-free engine: light SSBO + .irlights patcher (irl-core) ---
     // Plain Java lib via Gradle composite build (settings.gradle includeBuild),
     // bundled into the mod jar with Loom's `include` (synthesizes a stub fabric.mod.json).
-    clientImplementation "org.qualet:irl-core:1.0.0"
-    include "org.qualet:irl-core:1.0.0"
+    clientImplementation "org.qualet:irl-core:1.0-obt"
+    include "org.qualet:irl-core:1.0-obt"
 
     // Iris is referenced at compile time (sampler mixins). Sodium is runtime-only.
     modImplementation "maven.modrinth:iris:${V.iris}"

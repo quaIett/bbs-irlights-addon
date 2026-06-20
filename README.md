@@ -48,7 +48,6 @@ Apply them once with the in-game patcher — no manual GLSL edits needed.
 
 | Shaderpack | Author | Patch file |
 |---|---|---|
-| [IterationRP](https://www.curseforge.com/minecraft/customization/iterationrp) | Null | `patches/iterationrp.irlights` |
 | [Photon](https://modrinth.com/shader/photon-shader) | SixthSurge | `patches/photon.irlights` |
 | [Complementary Reimagined](https://modrinth.com/shader/complementary-reimagined) | EminGT | `patches/complementaryreimagined.irlights` |
 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | CaptTatsu | `patches/bsl.irlights` |

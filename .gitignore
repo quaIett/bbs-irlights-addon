@@ -127,3 +127,5 @@ Shadres/
 
 # Avoid ignoring Gradle wrapper jar file (.jar files are usually ignored)
 !gradle-wrapper.jar
+# Scratch backup dir from shader-port work (irlbak_*); name uses a PUA glyph rendered as ":"
+TEMP/

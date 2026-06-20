@@ -25,6 +25,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.chunk.BlockEntityTickInvoker;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
+import qualet.irlite.client.light.cookie.CookieArray;
 import qualet.irlite.forms.PointLightForm;
 import qualet.irlite.forms.SpotlightForm;
 import qualet.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
@@ -380,7 +381,15 @@ public final class LightCollector
         float cosOuter = (float) Math.cos(Math.toRadians(outer * 0.5F));
         float cosInner = (float) Math.cos(Math.toRadians(inner * 0.5F));
 
+        // Resolve the gobo texture (BBS Link) to its texture-array layer (loads on
+        // first use, cached after); -1 = no mask, so the cookie is OFF unless a
+        // texture is picked. Rotation is stored in degrees on the form (UI/keyframe
+        // friendly) -> radians for the SSBO. Cheap per-frame: a link->layer lookup.
+        int cookieLayer = CookieArray.resolve(form.cookie.get());
+        float cookieRot = (float) Math.toRadians(form.cookieRotation.get());
+        float cookieFlags = form.cookieInvert.get() ? 1F : 0F;
+
         Color c = form.color.get();
-        LightRegistry.registerSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, form.entitiesOnly.get(), form.blocksOnly.get(), form.anisotropy.get(), form.vlDensity.get(), form.beamStrength.get(), form.bulbSize.get(), form.shadows.get(), System.identityHashCode(form));
+        LightRegistry.registerSpot(origin.x, origin.y, origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, form.entitiesOnly.get(), form.blocksOnly.get(), form.anisotropy.get(), form.vlDensity.get(), form.beamStrength.get(), form.bulbSize.get(), form.shadows.get(), (float) cookieLayer, cookieRot, form.cookieScale.get(), cookieFlags, System.identityHashCode(form));
     }
 }

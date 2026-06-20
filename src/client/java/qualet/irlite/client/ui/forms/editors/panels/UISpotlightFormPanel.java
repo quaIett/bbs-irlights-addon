@@ -3,8 +3,10 @@ package qualet.irlite.client.ui.forms.editors.panels;
 import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.ui.forms.editors.forms.UIForm;
 import mchorse.bbs_mod.ui.forms.editors.panels.UIFormPanel;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIToggle;
 import mchorse.bbs_mod.ui.framework.elements.input.UIColor;
+import mchorse.bbs_mod.ui.framework.elements.input.UITexturePicker;
 import mchorse.bbs_mod.ui.framework.elements.input.UITrackpad;
 import mchorse.bbs_mod.ui.utils.UI;
 import mchorse.bbs_mod.utils.colors.Color;
@@ -24,6 +26,11 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
     public UIToggle entitiesOnly;
     public UIToggle blocksOnly;
     public UIToggle shadows;
+
+    public UIButton cookiePick;
+    public UITrackpad cookieRotation;
+    public UITrackpad cookieScale;
+    public UIToggle cookieInvert;
 
     public UISpotlightFormPanel(UIForm editor)
     {
@@ -57,6 +64,14 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
         });
         this.shadows = new UIToggle(IKey.constant("Shadows"), (b) -> this.form.shadows.set(b.getValue()));
 
+        // Gobo / cookie: a projected grayscale mask (white = pass, black = block).
+        // OFF until a texture is picked. All four fields keyframe in the film editor.
+        this.cookiePick = new UIButton(IKey.constant("Cookie texture (gobo)"), (b) ->
+            UITexturePicker.open(this.getContext(), this.form.cookie.get(), (l) -> this.form.cookie.set(l)));
+        this.cookieRotation = new UITrackpad((v) -> this.form.cookieRotation.set(v.floatValue())).limit(0, 360);
+        this.cookieScale = new UITrackpad((v) -> this.form.cookieScale.set(v.floatValue())).limit(0.1, 4);
+        this.cookieInvert = new UIToggle(IKey.constant("Invert gobo"), (b) -> this.form.cookieInvert.set(b.getValue()));
+
         this.options.add(UI.label(IKey.constant("Color")), this.color);
         this.options.add(UI.label(IKey.constant("Intensity")), this.intensity);
         this.options.add(UI.label(IKey.constant("Range")), this.range);
@@ -69,6 +84,10 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
         this.options.add(this.entitiesOnly);
         this.options.add(this.blocksOnly);
         this.options.add(this.shadows);
+        this.options.add(UI.label(IKey.constant("Cookie / gobo (spot mask)")), this.cookiePick);
+        this.options.add(UI.label(IKey.constant("Cookie rotation")), this.cookieRotation);
+        this.options.add(UI.label(IKey.constant("Cookie scale")), this.cookieScale);
+        this.options.add(this.cookieInvert);
     }
 
     @Override
@@ -88,5 +107,8 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
         this.entitiesOnly.setValue(form.entitiesOnly.get());
         this.blocksOnly.setValue(form.blocksOnly.get());
         this.shadows.setValue(form.shadows.get());
+        this.cookieRotation.setValue(form.cookieRotation.get());
+        this.cookieScale.setValue(form.cookieScale.get());
+        this.cookieInvert.setValue(form.cookieInvert.get());
     }
 }

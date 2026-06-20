@@ -127,3 +127,6 @@ Shadres/
 
 # Avoid ignoring Gradle wrapper jar file (.jar files are usually ignored)
 !gradle-wrapper.jar
+# IterationRP integration — private/paid shader, hidden from repo pending author permission (kept local only)
+patches/iterationrp.irlights
+tools/gen-iterationrp-patch.ps1

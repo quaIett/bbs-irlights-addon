@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** The IRLite shader patcher, rendered as controls inside the IRLite settings section. */
 public final class UIPatcherSection
@@ -40,7 +41,7 @@ public final class UIPatcherSection
     private static String selectedPack;
     private static Path selectedPatch;
     private static boolean createNew = false;
-    private static String status = "Select a shaderpack and a patch.";
+    private static String status = "Select a shaderpack and a patch for it.";
     private static int statusColor = Colors.WHITE;
 
     private static UILabel metaLabel;
@@ -118,7 +119,7 @@ public final class UIPatcherSection
         }
         options.add(patchList);
 
-        // --- selected patch metadata (name -> target, op count, pack mismatch warning) ---
+        // --- selected-patch meta (which shaderpack it's for + match state) ---
         metaLabel = new UILabel(IKey.constant(""), META_COLOR);
         metaLabel.h(28);
         options.add(metaLabel);
@@ -159,7 +160,8 @@ public final class UIPatcherSection
         }
         catch (Exception e)
         {
-            setMeta("Broken patch: " + e.getMessage(), ERR_COLOR);
+            LOG.warn("failed to parse patch {}", selectedPatch, e);
+            setMeta("Couldn't read this patch.", ERR_COLOR);
             return;
         }
 
@@ -180,18 +182,26 @@ public final class UIPatcherSection
             }
         }
 
-        String text = (parsed.name.isEmpty() ? selectedPatch.getFileName().toString() : parsed.name)
-            + " -> " + (parsed.target.isEmpty() ? "?" : parsed.target)
-            + (parsed.packVersion.isEmpty() ? "" : " " + parsed.packVersion)
-            + " (" + parsed.ops.size() + " ops)";
+        // Friendly, plain-language meta line: which shaderpack the patch is for and
+        // whether the selected pack matches. Colour carries the signal (green = matches,
+        // amber = different pack, red = unreadable) — no jargon, no op counts.
+        boolean hasTarget = !parsed.target.isEmpty();
 
-        if (selectedPack != null && !parsed.target.isEmpty() && !packMatchesTarget(selectedPack, parsed.target))
+        if (selectedPack == null)
         {
-            setMeta(text + " - does not match the selected pack!", WARN_COLOR);
+            // A patch is chosen but no shaderpack yet — point the user at the right one.
+            setMeta(hasTarget
+                ? "This patch is for the " + parsed.target + " shaderpack. Select it above."
+                : "Select a shaderpack above to continue.", META_COLOR);
+        }
+        else if (hasTarget && !packMatchesTarget(selectedPack, parsed.target))
+        {
+            setMeta("This patch is for a different shaderpack (" + parsed.target + ").", WARN_COLOR);
         }
         else
         {
-            setMeta(text, META_COLOR);
+            setMeta("This patch is made for the " + (hasTarget ? parsed.target : selectedPack)
+                + " shaderpack.", OK_COLOR);
         }
     }
 
@@ -218,12 +228,12 @@ public final class UIPatcherSection
     {
         if (selectedPack == null)
         {
-            setStatus(false, "Select a shaderpack first.");
+            setStatus(false, "Select a shaderpack from the list.");
             return null;
         }
         if (selectedPatch == null)
         {
-            setStatus(false, "Select a patch first.");
+            setStatus(false, "Select a patch for the shaderpack.");
             return null;
         }
 
@@ -231,14 +241,10 @@ public final class UIPatcherSection
         {
             return IrlPatchParser.parse(Files.readString(selectedPatch, StandardCharsets.UTF_8));
         }
-        catch (IrlPatchParser.ParseException e)
-        {
-            setStatus(false, "Parse error: " + e.getMessage());
-            return null;
-        }
         catch (Exception e)
         {
-            setStatus(false, "Cannot read patch: " + e.getMessage());
+            LOG.warn("failed to parse patch {}", selectedPatch, e);
+            setStatus(false, "Couldn't read the selected patch.");
             return null;
         }
     }
@@ -256,7 +262,7 @@ public final class UIPatcherSection
         {
             LOG.info("[validate] {}", line);
         }
-        setStatus(result.ok, result.summary);
+        applyResult(true, result, null);
     }
 
     private static void runPatch()
@@ -267,15 +273,16 @@ public final class UIPatcherSection
             return;
         }
 
+        String outName = outputName(selectedPack);
         Path source = Shaderpacks.packPath(selectedPack);
-        Path output = Shaderpacks.dir().resolve(outputName(selectedPack));
+        Path output = Shaderpacks.dir().resolve(outName);
         PatchResult result = IrlPatchApplier.apply(source, output, parsed);
 
         for (String line : result.log)
         {
             LOG.info("[patch] {}", line);
         }
-        setStatus(result.ok, result.summary);
+        applyResult(false, result, outName);
 
         // Re-read lists so a newly created patched pack shows up.
         if (rebuild != null)
@@ -311,6 +318,44 @@ public final class UIPatcherSection
             }
         }
         return base;
+    }
+
+    /** Maps the shared irl-core {@link PatchResult} into one friendly status line.
+     *  The full per-op detail still goes to the {@code irlite} log; this keeps the
+     *  shared engine text untouched (the user never sees the raw English summary). */
+    private static void applyResult(boolean validate, PatchResult result, String outputName)
+    {
+        if (result.ok)
+        {
+            setStatus(true, validate
+                ? "It fits! Press Patch to create the light version of the pack."
+                : "Done! Pack \"" + outputName + "\" created. Select it in Iris settings.");
+            return;
+        }
+
+        String s = result.summary == null ? "" : result.summary.toLowerCase(Locale.ROOT);
+        String message;
+        if (s.contains("already patched") || s.contains("already exists"))
+        {
+            message = "This shaderpack already has the light. Pick the original (clean) pack.";
+        }
+        else if (s.contains("contract"))
+        {
+            message = "Patch isn't compatible with this mod version. Update the mod or the patch.";
+        }
+        else if (s.contains("not a folder or .zip") || s.contains("no shaders/"))
+        {
+            message = "Couldn't open the shaderpack. Make sure a valid pack is selected.";
+        }
+        else if (s.contains("io error"))
+        {
+            message = "File error. Close the pack in other programs and try again.";
+        }
+        else
+        {
+            message = "This patch didn't fit the selected pack, maybe it's a different version.";
+        }
+        setStatus(false, message);
     }
 
     private static void setMeta(String message, int color)

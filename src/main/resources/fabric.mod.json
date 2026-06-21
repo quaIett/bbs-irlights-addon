@@ -25,6 +25,7 @@
 		"fabricloader": ">=${loader_version}",
 		"fabric-api": "*",
 		"bbs": "*",
-		"minecraft": "~1.21.1"
+		"minecraft": "~1.21.1",
+		"irl-core": "*"
 	}
 }

@@ -13,7 +13,7 @@ import java.util.List;
 
 /**
  * {@link PatcherHost} for the BBS addon: the Minecraft game dir, Iris's shaderpacks
- * directory + listing, BBS's {@code UIUtils} folder-open, and the 6 .irlights bundled
+ * directory + listing, BBS's {@code UIUtils} folder-open, and the 7 .irlights bundled
  * under {@code assets/irlite/patches/} (embedded from {@code patches/} at build time).
  * Installed at client init via {@code Patcher.install(new BbsPatcherHost())}.
  */
@@ -25,6 +25,7 @@ public final class BbsPatcherHost implements PatcherHost
         "bliss.irlights",
         "bsl.irlights",
         "complementaryreimagined.irlights",
+        "eclipse.irlights",
         "iterationrp.irlights",
         "photon.irlights",
         "solas.irlights"

@@ -82,7 +82,7 @@ public final class UIPatcherSection
             }
         });
         packList.background();
-        packList.h(96);
+        packList.h(80);
         for (String pack : packs)
         {
             packList.add(IKey.constant(pack), pack);
@@ -108,7 +108,7 @@ public final class UIPatcherSection
             }
         });
         patchList.background();
-        patchList.h(96);
+        patchList.h(80);
         for (Path patch : patches)
         {
             patchList.add(IKey.constant(patch.getFileName().toString()), patch);

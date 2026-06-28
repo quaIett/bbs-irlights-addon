@@ -37,14 +37,14 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
         super(editor);
 
         this.color = new UIColor((c) -> this.form.color.set(Color.rgba(c))).withAlpha();
-        this.intensity = new UITrackpad((v) -> this.form.intensity.set(v.floatValue())).limit(0, 20);
-        this.range = new UITrackpad((v) -> this.form.range.set(v.floatValue())).limit(0.1, 128);
-        this.radius = new UITrackpad((v) -> this.form.radius.set(v.floatValue())).limit(1, 179);
-        this.innerRadius = new UITrackpad((v) -> this.form.innerRadius.set(v.floatValue())).limit(1, 179);
-        this.beamStrength = new UITrackpad((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 5);
-        this.anisotropy = new UITrackpad((v) -> this.form.anisotropy.set(v.floatValue())).limit(-0.95, 0.95);
-        this.vlDensity = new UITrackpad((v) -> this.form.vlDensity.set(v.floatValue())).limit(0.005, 0.5);
-        this.bulbSize = new UITrackpad((v) -> this.form.bulbSize.set(v.floatValue())).limit(0, 2);
+        this.intensity = IrliteTrackpads.create((v) -> this.form.intensity.set(v.floatValue())).limit(0, 20);
+        this.range = IrliteTrackpads.create((v) -> this.form.range.set(v.floatValue())).limit(0.1, 128);
+        this.radius = IrliteTrackpads.create((v) -> this.form.radius.set(v.floatValue())).limit(1, 179);
+        this.innerRadius = IrliteTrackpads.create((v) -> this.form.innerRadius.set(v.floatValue())).limit(1, 179);
+        this.beamStrength = IrliteTrackpads.create((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 5);
+        this.anisotropy = IrliteTrackpads.create((v) -> this.form.anisotropy.set(v.floatValue())).limit(-0.95, 0.95);
+        this.vlDensity = IrliteTrackpads.create((v) -> this.form.vlDensity.set(v.floatValue())).limit(0.005, 0.5);
+        this.bulbSize = IrliteTrackpads.create((v) -> this.form.bulbSize.set(v.floatValue())).limit(0, 2);
         // "Entities only" and "Blocks only" are mutually exclusive (both on = light lights nothing).
         this.entitiesOnly = new UIToggle(IKey.constant("Entities only"), (b) -> {
             this.form.entitiesOnly.set(b.getValue());
@@ -68,8 +68,8 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
         // OFF until a texture is picked. All four fields keyframe in the film editor.
         this.cookiePick = new UIButton(IKey.constant("Cookie texture (gobo)"), (b) ->
             UITexturePicker.open(this.getContext(), this.form.cookie.get(), (l) -> this.form.cookie.set(l)));
-        this.cookieRotation = new UITrackpad((v) -> this.form.cookieRotation.set(v.floatValue())).limit(0, 360);
-        this.cookieScale = new UITrackpad((v) -> this.form.cookieScale.set(v.floatValue())).limit(0.1, 4);
+        this.cookieRotation = IrliteTrackpads.create((v) -> this.form.cookieRotation.set(v.floatValue())).limit(0, 360);
+        this.cookieScale = IrliteTrackpads.create((v) -> this.form.cookieScale.set(v.floatValue())).limit(0.1, 4);
         this.cookieInvert = new UIToggle(IKey.constant("Invert gobo"), (b) -> this.form.cookieInvert.set(b.getValue()));
 
         this.options.add(UI.label(IKey.constant("Color")), this.color);

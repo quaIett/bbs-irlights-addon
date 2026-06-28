@@ -106,8 +106,8 @@ dependencies {
     // Per-version Loom module from mavenLocal: modClientImplementation remaps it from
     // intermediary to this mod's named mappings; `include` bundles it (JiJ). Publish it
     // with `gradlew publishToMavenLocal` in ../irl-core before building this mod.
-    modClientImplementation "org.qualet:irl-core:1.0-obt"
-    include "org.qualet:irl-core:1.0-obt"
+    modClientImplementation "org.qualet:irl-core:1.1"
+    include "org.qualet:irl-core:1.1"
 
     // Iris is referenced at compile time (sampler mixins). Sodium is runtime-only.
     modImplementation "maven.modrinth:iris:${V.iris}"

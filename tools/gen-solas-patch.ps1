@@ -8,7 +8,7 @@
 # must be empty. See memory solas-port-plan Phase 5.
 
 $ErrorActionPreference = "Stop"
-$repo = "C:\Users\Qualet\Documents\Project\Minecraft\BBS\IRLite"
+$repo = "C:\Users\Qualet\Documents\Project\Minecraft\BBS\bbs-irlights-addon"
 $mod  = "$repo\Shadres\Modification\Solas\shaders"
 $out  = "$repo\patches\solas.irlights"
 
@@ -87,7 +87,7 @@ if (@($slLine).Count -ne 1) { throw "sliders line not unique" }
 $slIdx = $slLine.IndexOf('WAVING_AMPLITUDE FIREFLIES_BRIGHTNESS')
 if ($slIdx -lt 0) { throw "sliders tail anchor not found" }
 $slBody = $slLine.Substring($slIdx)
-if (-not $slBody.EndsWith('IRLITE_OUTLINE_DEPTH_THRESHOLD')) { throw "sliders body tail unexpected" }
+if (-not $slBody.EndsWith('IRLITE_OUTLINE_FRESNEL_POWER')) { throw "sliders body tail unexpected" }
 
 # lang: everything after the pack's true last line, both locales. The ru anchor
 # line is taken from the file itself (no cyrillic literals in this script).

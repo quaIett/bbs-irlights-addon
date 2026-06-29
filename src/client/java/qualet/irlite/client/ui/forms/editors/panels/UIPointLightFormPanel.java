@@ -32,7 +32,7 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.color = new UIColor((c) -> this.form.color.set(Color.rgba(c))).withAlpha();
         this.intensity = IrliteTrackpads.create((v) -> this.form.intensity.set(v.floatValue())).limit(0, 20);
         this.radius = IrliteTrackpads.create((v) -> this.form.radius.set(v.floatValue())).limit(0.1, 64);
-        this.beamStrength = IrliteTrackpads.create((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 5);
+        this.beamStrength = IrliteTrackpads.create((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 50);
         this.anisotropy = IrliteTrackpads.create((v) -> this.form.anisotropy.set(v.floatValue())).limit(-0.95, 0.95);
         this.vlDensity = IrliteTrackpads.create((v) -> this.form.vlDensity.set(v.floatValue())).limit(0.005, 0.5);
         this.bulbSize = IrliteTrackpads.create((v) -> this.form.bulbSize.set(v.floatValue())).limit(0, 2);

@@ -43,7 +43,7 @@ public class UISpotlightFormPanel extends UIFormPanel<SpotlightForm>
         this.range = IrliteTrackpads.create((v) -> this.form.range.set(v.floatValue())).limit(0.1, 128);
         this.radius = IrliteTrackpads.create((v) -> this.form.radius.set(v.floatValue())).limit(1, 179);
         this.innerRadius = IrliteTrackpads.create((v) -> this.form.innerRadius.set(v.floatValue())).limit(1, 179);
-        this.beamStrength = IrliteTrackpads.create((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 5);
+        this.beamStrength = IrliteTrackpads.create((v) -> this.form.beamStrength.set(v.floatValue())).limit(0, 50);
         this.anisotropy = IrliteTrackpads.create((v) -> this.form.anisotropy.set(v.floatValue())).limit(-0.95, 0.95);
         this.vlDensity = IrliteTrackpads.create((v) -> this.form.vlDensity.set(v.floatValue())).limit(0.005, 0.5);
         this.bulbSize = IrliteTrackpads.create((v) -> this.form.bulbSize.set(v.floatValue())).limit(0, 2);

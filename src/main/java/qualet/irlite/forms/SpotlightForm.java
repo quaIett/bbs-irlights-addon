@@ -17,7 +17,7 @@ public class SpotlightForm extends Form
     public final ValueFloat range = new ValueFloat("range", 12F, 0.1F, 128F);
     public final ValueFloat radius = new ValueFloat("radius", 35F, 1F, 179F);
     public final ValueFloat innerRadius = new ValueFloat("inner_radius", 25F, 1F, 179F);
-    public final ValueFloat beamStrength = new ValueFloat("beam_strength", 1F, 0F, 5F);
+    public final ValueFloat beamStrength = new ValueFloat("beam_strength", 1F, 0F, 50F);
     public final ValueFloat anisotropy = new ValueFloat("anisotropy", 0.4F, -0.95F, 0.95F);
     public final ValueFloat vlDensity = new ValueFloat("vl_density", 0.05F, 0.005F, 0.5F);
     public final ValueFloat bulbSize = new ValueFloat("bulb_size", 0F, 0F, 2F);

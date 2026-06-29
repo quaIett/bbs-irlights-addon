@@ -42,6 +42,12 @@
 #define IRLITE_OUTLINE_PIXEL_SIZE 2 // [1 2 3 4 5 6]
 #define IRLITE_OUTLINE_STRENGTH 0.65 // [0.0 0.1 0.2 0.35 0.5 0.65 0.8 1.0 1.5 2.0 3.0]
 #define IRLITE_OUTLINE_FRESNEL_POWER 2.2 // [1.0 1.2 1.5 1.8 2.0 2.2 2.5 3.0 4.0]
+// each new feature = on/off toggle + strength slider. BACK = base rim strength, slider only (0 = off).
+#define IRLITE_OUTLINE_BACK 1.0 // [0.0 0.25 0.5 0.75 1.0 1.5 2.0]
+#define IRLITE_OUTLINE_FRONT                  // catch-light rim facing the light (on/off)
+#define IRLITE_OUTLINE_FRONT_STRENGTH 0.3 // [0.0 0.15 0.3 0.5 0.75 1.0 1.5]
+#define IRLITE_OUTLINE_GLOW                   // soft inner Fresnel halo, feeds bloom (on/off)
+#define IRLITE_OUTLINE_GLOW_STRENGTH 0.12 // [0.0 0.05 0.12 0.2 0.35 0.5 0.75]
 
 // ---- SSBO (binding 7) — byte-for-byte mirror of LightBuffer.java std430 ----
 struct IrliteLight
@@ -457,9 +463,12 @@ void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material mat
     uint count = irlite_lightCount;
 
     #ifdef IRLITE_OUTLINE
-        // depth-edge x Fresnel silhouette factor, shared by all lights (per fragment)
-        float contourFactor = irlite_outlineFactor()
-                            * pow(clamp01(1.0 - abs(dot(n, v))), IRLITE_OUTLINE_FRESNEL_POWER);
+        // depth-edge x Fresnel silhouette + optional soft inner Fresnel halo, shared by all lights (per fragment)
+        float irlFres = pow(clamp01(1.0 - abs(dot(n, v))), IRLITE_OUTLINE_FRESNEL_POWER);
+        float contourFactor = irlite_outlineFactor() * irlFres;
+        #ifdef IRLITE_OUTLINE_GLOW
+            contourFactor += IRLITE_OUTLINE_GLOW_STRENGTH * irlFres;
+        #endif
     #endif
 
     for (uint i = 0u; i < count; i++)
@@ -512,8 +521,12 @@ void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material mat
         diffuseOut += lightCol * diffuse;
 
         #ifdef IRLITE_OUTLINE
-            // backlight rim: depth-edge x Fresnel x (1-NdotL) x attenuation, tinted by the light colour
-            outlineOut += lightCol * (contourFactor * (1.0 - ndl) * attenuation * IRLITE_OUTLINE_STRENGTH);
+            // rim: back (light behind) + optional front catch-light, x attenuation, tinted by the light colour
+            float irlRim = IRLITE_OUTLINE_BACK * (1.0 - ndl);
+            #ifdef IRLITE_OUTLINE_FRONT
+                irlRim += IRLITE_OUTLINE_FRONT_STRENGTH * ndl;
+            #endif
+            outlineOut += lightCol * (contourFactor * irlRim * attenuation * IRLITE_OUTLINE_STRENGTH);
         #endif
 
         if (doSpec && ndl > 0.0)
@@ -930,12 +943,12 @@ screen.irlite_specular   = IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY
 screen.irlite_volumetric = IRLITE_VOLUMETRIC IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_MAX_DIST IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS
 screen.irlite_shadows    = IRLITE_SHADOWS IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS
 screen.irlite_toon       = IRLITE_TOON IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
-screen.irlite_outline    = IRLITE_OUTLINE IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER
+screen.irlite_outline    = IRLITE_OUTLINE IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 
 replace "DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS"
 <<<
-DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER
+DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 
 replace "iris.features.optional = CUSTOM_IMAGES ENTITY_TRANSLUCENT"
@@ -993,12 +1006,23 @@ option.IRLITE_TOON_BANDS               = §aToon Bands
 option.IRLITE_TOON_SMOOTH              = §aToon Smoothing
 
 option.IRLITE_OUTLINE                  = §eOutline
-option.IRLITE_OUTLINE.comment          = Backlight rim in the light's colour along geometry silhouettes (depth-edge x Fresnel). Ported from IRLEngine
+option.IRLITE_OUTLINE.comment          = Master toggle: light-driven rim outline (depth silhouette + glow) in the light's colour. Off by default. Sub-features toggle below.
 option.IRLITE_OUTLINE_PIXEL_SIZE       = §eLine Width
 option.IRLITE_OUTLINE_PIXEL_SIZE.comment = Pixel thickness of the rim edge detection
 option.IRLITE_OUTLINE_STRENGTH         = §eLine Strength
 option.IRLITE_OUTLINE_FRESNEL_POWER    = §eFresnel Power
 option.IRLITE_OUTLINE_FRESNEL_POWER.comment = Higher tightens the rim to the silhouette edge
+
+option.IRLITE_OUTLINE_BACK             = §eBack Rim
+option.IRLITE_OUTLINE_BACK.comment     = Strength of the rim where the light is behind the surface (classic backlight halo). 0 = off.
+option.IRLITE_OUTLINE_FRONT            = §eFront Catch-Light
+option.IRLITE_OUTLINE_FRONT.comment    = Adds a rim on the edge facing the light (catch-light), on top of the back rim.
+option.IRLITE_OUTLINE_FRONT_STRENGTH   = §eFront Strength
+option.IRLITE_OUTLINE_FRONT_STRENGTH.comment = Brightness of the front catch-light rim.
+option.IRLITE_OUTLINE_GLOW             = §eInner Glow
+option.IRLITE_OUTLINE_GLOW.comment     = Soft Fresnel halo just inside the silhouette; picked up by the pack bloom so light appears to wrap the edge.
+option.IRLITE_OUTLINE_GLOW_STRENGTH    = §eGlow Strength
+option.IRLITE_OUTLINE_GLOW_STRENGTH.comment = Intensity of the soft inner glow.
 
 suffix.IRLITE_VL_MAX_DIST              = m
 suffix.IRLITE_VL_TIP_RADIUS            = m

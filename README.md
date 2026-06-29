@@ -53,6 +53,7 @@ Apply them once with the in-game patcher — no manual GLSL edits needed.
 | [BSL Shaders](https://modrinth.com/shader/bsl-shaders) | CaptTatsu | `patches/bsl.irlights` |
 | [Solas](https://modrinth.com/shader/solas-shader) | Septonious | `patches/solas.irlights` |
 | [Bliss](https://modrinth.com/shader/bliss-shader) | X0nk | `patches/bliss.irlights` |
+| [Eclipse](https://github.com/Merlin1809/Eclipse-Shader) (Bliss edit) | Merlin1809 | `patches/eclipse.irlights` |
 
 ---
 

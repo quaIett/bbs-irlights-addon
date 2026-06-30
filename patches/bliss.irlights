@@ -40,6 +40,7 @@
 #define IRLITE_TOON_SMOOTH 0.10 // [0.0 0.05 0.10 0.20 0.30 0.50]
 
 //#define IRLITE_OUTLINE                     // backlight rim outline (depth-edge x Fresnel), from IRLEngine LocalLightOutline
+#define IRLITE_OUTLINE_TARGET 0 // [0 1 2]    // 0 both / 1 only entities / 2 only blocks (same codes as lightMask)
 #define IRLITE_OUTLINE_PIXEL_SIZE 2 // [1 2 3 4 5 6]
 #define IRLITE_OUTLINE_STRENGTH 0.65 // [0.0 0.1 0.2 0.35 0.5 0.65 0.8 1.0 1.5 2.0 3.0]
 #define IRLITE_OUTLINE_FRESNEL_POWER 2.2 // [1.0 1.2 1.5 1.8 2.0 2.2 2.5 3.0 4.0]
@@ -1025,13 +1026,29 @@ before "  color *= vl.a*cloudAlpha ;"
   vec3 irliteFlatN = cross(dFdx(p3), dFdy(p3));
   if (z < 1.0) {
     float irliteOpq = irlite_decodeVec2Y(texelFetch(colortex1, ivec2(gl_FragCoord.xy), 0).a);
-    if (!(abs(irliteOpq - 0.75) < 0.01)) {
+    bool irliteODraw = !(abs(irliteOpq - 0.75) < 0.01); // exclude hand (mask 0.75)
+    #if IRLITE_OUTLINE_TARGET != 0
+      bool irliteOEntity = abs(irliteOpq - 0.45) < 0.01; // native entity tag (all entities tagged 0.45 in all_solid.vsh)
+      #if IRLITE_OUTLINE_TARGET == 1
+        irliteODraw = irliteODraw && irliteOEntity;
+      #else
+        irliteODraw = irliteODraw && !irliteOEntity;
+      #endif
+    #endif
+    if (irliteODraw) {
       if (dot(irliteFlatN, p3) > 0.0) irliteFlatN = -irliteFlatN;
       color += IRLITE_INTENSITY * irlite_outlineInk(p3, irliteFlatN);
     }
   }
   #endif
 
+>>>
+
+# --- tag every entity (incl. BBS morphs) so Outline Target can isolate them ---
+@file shaders/dimensions/all_solid.vsh
+after "\tif(entityId == ENTITY_SSS_MEDIUM || entityId == ENTITY_SSS_WEAK || entityId == ENTITY_PLAYER || entityId == 2468) normalMat.a = 0.45;"
+<<<
+	if(normalMat.a > 0.99) normalMat.a = 0.45; // IRLite: tag default entities (BBS morphs/actors) with the entity mask so Outline Target detects them
 >>>
 
 # --- SSBO feature flag, main-screen entry, screens + sliders ---
@@ -1067,11 +1084,11 @@ after "        screen.selection_box_outline = SELECT_BOX SELECT_BOX_COL_R SELECT
         screen.IRLITE_TOON_SCREEN = IRLITE_TOON IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
 
         screen.IRLITE_OUTLINE_SCREEN.columns = 1
-        screen.IRLITE_OUTLINE_SCREEN = IRLITE_OUTLINE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
+        screen.IRLITE_OUTLINE_SCREEN = IRLITE_OUTLINE IRLITE_OUTLINE_TARGET IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 replace "LPV_SATURATION LPV_TINT_SATURATION LPV_NORMAL_STRENGTH"
 <<<
-LPV_SATURATION LPV_TINT_SATURATION LPV_NORMAL_STRENGTH IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SPECULAR_SMOOTHNESS IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET IRLITE_VL_SHADOW_STRIDE IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
+LPV_SATURATION LPV_TINT_SATURATION LPV_NORMAL_STRENGTH IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SPECULAR_SMOOTHNESS IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET IRLITE_VL_SHADOW_STRIDE IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_TARGET IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 
 # --- option labels + tooltips (English) ---
@@ -1134,6 +1151,11 @@ option.IRLITE_TOON_SMOOTH = §aBand Smoothing§r
 
 option.IRLITE_OUTLINE = §eBacklight Rim§r
 option.IRLITE_OUTLINE.comment = Master toggle for the light-driven rim outline (depth silhouette + glow), tinted by the light colour. Off by default. Sub-features toggle below.
+option.IRLITE_OUTLINE_TARGET = §eOutline Target§r
+option.IRLITE_OUTLINE_TARGET.comment = Which surfaces the rim outline draws on. Both = entities and blocks; Only Entities = mobs/players/morphs/items; Only Blocks = terrain and block entities.
+value.IRLITE_OUTLINE_TARGET.0 = §eBoth§r
+value.IRLITE_OUTLINE_TARGET.1 = §eOnly Entities§r
+value.IRLITE_OUTLINE_TARGET.2 = §eOnly Blocks§r
 option.IRLITE_OUTLINE_STRENGTH = §eRim Strength§r
 option.IRLITE_OUTLINE_STRENGTH.comment = Rim brightness multiplier. 0.65 matches the IRLite diffuse scale.
 option.IRLITE_OUTLINE_PIXEL_SIZE = §eRim Width (px)§r
@@ -1217,6 +1239,11 @@ option.IRLITE_TOON_SMOOTH = §aСглаживание полос§r
 
 option.IRLITE_OUTLINE = §eКонтражурный рим§r
 option.IRLITE_OUTLINE.comment = Контражурный рим (IRLEngine LocalLightOutline): силуэт по разрыву глубины x Френель x (1-NdotL), в цвет источника. Фронтальный свет линию не рисует.
+option.IRLITE_OUTLINE_TARGET = §eОбласть рима§r
+option.IRLITE_OUTLINE_TARGET.comment = На что наносится рим. Обе = сущности и блоки; Только сущности = мобы/игроки/морфы/предметы; Только блоки = террейн и блок-сущности.
+value.IRLITE_OUTLINE_TARGET.0 = §eОбе§r
+value.IRLITE_OUTLINE_TARGET.1 = §eТолько сущности§r
+value.IRLITE_OUTLINE_TARGET.2 = §eТолько блоки§r
 option.IRLITE_OUTLINE_STRENGTH = §eСила рима§r
 option.IRLITE_OUTLINE_STRENGTH.comment = Множитель яркости рима. 0.65 соответствует диффуз-шкале IRLite.
 option.IRLITE_OUTLINE_PIXEL_SIZE = §eТолщина рима (px)§r

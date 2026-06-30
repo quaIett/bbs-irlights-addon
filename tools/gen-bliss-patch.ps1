@@ -102,6 +102,13 @@ $c3Body = $c3[$S3..($V - 1)]
 if ($c3Body[-1] -cne '') { throw "expected trailing blank in c3Body" }
 if ($c3Body[-2] -cne '  #endif') { throw "c3Body tail unexpected" }
 
+# ---- all_solid.vsh: unconditional entity tag (line added right after the native SSS-entity tag) ----
+$as = Lines "$mod\dimensions\all_solid.vsh"
+$asAnchor = "`tif(entityId == ENTITY_SSS_MEDIUM || entityId == ENTITY_SSS_WEAK || entityId == ENTITY_PLAYER || entityId == 2468) normalMat.a = 0.45;"
+$asIdx = IndexOfLine $as $asAnchor
+$asBody = $as[$asIdx + 1]
+if ($asBody -notmatch 'IRLite: tag default entities') { throw "all_solid entity-tag body missing after anchor" }
+
 # ---- shaders.properties: features, main-screen row, screens block, sliders ----
 $pr = Lines "$mod\shaders.properties"
 $prP = Lines "$pris\shaders.properties"
@@ -196,6 +203,11 @@ Emit ('after "' + (EscAnchor '#include "/lib/DistantHorizons_projections.glsl"')
 EmitBody @('', '#define IRLITE_COMPOSITE_PASS', '#include "/lib/irlite/irlite_lights.glsl"')
 Emit ('before "' + (EscAnchor '  color *= vl.a*cloudAlpha ;') + '"')
 EmitBody $c3Body
+Emit ''
+Emit '# --- tag every entity (incl. BBS morphs) so Outline Target can isolate them ---'
+Emit '@file shaders/dimensions/all_solid.vsh'
+Emit ('after "' + (EscAnchor $asAnchor) + '"')
+EmitBody @($asBody)
 Emit ''
 Emit '# --- SSBO feature flag, main-screen entry, screens + sliders ---'
 Emit '@file shaders/shaders.properties'

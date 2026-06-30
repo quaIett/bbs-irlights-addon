@@ -41,6 +41,7 @@
 #define IRLITE_TOON_SMOOTH 0.10 // [0.0 0.05 0.10 0.20 0.30 0.50]
 
 //#define IRLITE_OUTLINE                     // backlight rim outline (depth-edge x Fresnel), from IRLEngine LocalLightOutline
+#define IRLITE_OUTLINE_TARGET 0 // [0 1 2]
 #define IRLITE_OUTLINE_PIXEL_SIZE 2 // [1 2 3 4 5 6]
 #define IRLITE_OUTLINE_STRENGTH 0.65 // [0.0 0.1 0.2 0.35 0.5 0.65 0.8 1.0 1.5 2.0 3.0]
 #define IRLITE_OUTLINE_FRESNEL_POWER 2.2 // [1.0 1.2 1.5 1.8 2.0 2.2 2.5 3.0 4.0]
@@ -1145,6 +1146,14 @@ after "#ifdef FSH"
 <<<
 #define IRLITE_NONTERRAIN // IRLite: entity/hand/block program (lightMask gate)
 >>>
+replace "/* DRAWBUFFERS:01 */"
+<<<
+/* DRAWBUFFERS:013 */
+>>>
+after "    gl_FragData[1] = vec4(vlAlbedo, 1.0);"
+<<<
+    gl_FragData[2] = vec4(0.0, 0.0, entityMask, 1.0); // colortex3.z: IRLite entity flag for outline target (MCBL/PBR branches below re-pin their own layout)
+>>>
 @file shaders/program/gbuffers_entities_glowing.glsl
 after "#ifdef FSH"
 <<<
@@ -1173,6 +1182,10 @@ after "#ifdef FSH"
 
 # --- rim outline + volumetric upsample in composite ---
 @file shaders/program/composite.glsl
+after "uniform sampler2D colortex1;"
+<<<
+uniform sampler2D colortex3;
+>>>
 after "#include \"/lib/atmospherics/waterFog.glsl\""
 <<<
 
@@ -1188,8 +1201,20 @@ after "vec3 reflectionColor = pow(color.rgb, vec3(0.125)) * 0.5;"
 	vec3 irliteONormal = cross(dFdx(irliteOPlayerPos), dFdy(irliteOPlayerPos));
 	if (z0 < 1.0 && z0 > 0.56)
 	{
-		if (dot(irliteONormal, irliteOPlayerPos) > 0.0) irliteONormal = -irliteONormal;
-		color.rgb += IRLITE_INTENSITY * irlite_outlineInk(irliteOPlayerPos, irliteONormal);
+		bool irliteODraw = true;
+		#if IRLITE_OUTLINE_TARGET != 0
+			float irliteOMat = texture2D(colortex3, texCoord).z; // BSL: entities tagged 0.25 in colortex3.z (gbuffers_entities); blocks/clear = 0.0
+			bool irliteOEntity = irliteOMat > 0.1;
+			#if IRLITE_OUTLINE_TARGET == 1
+				irliteODraw = irliteOEntity;
+			#else
+				irliteODraw = !irliteOEntity;
+			#endif
+		#endif
+		if (irliteODraw) {
+			if (dot(irliteONormal, irliteOPlayerPos) > 0.0) irliteONormal = -irliteONormal;
+			color.rgb += IRLITE_INTENSITY * irlite_outlineInk(irliteOPlayerPos, irliteONormal);
+		}
 	}
 	#endif
 
@@ -1247,11 +1272,11 @@ screen.IRLITE_SPECULAR_SETTINGS=<empty> <empty> IRLITE_SPECULAR IRLITE_SPECULAR_
 screen.IRLITE_SHADOW_SETTINGS=<empty> <empty> IRLITE_SHADOWS IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET
 screen.IRLITE_VL_SETTINGS=<empty> <empty> IRLITE_VOLUMETRIC IRLITE_VL_SHADOWS IRLITE_VL_INTENSITY IRLITE_VL_RESOLUTION IRLITE_VL_STEPS IRLITE_VL_SHADOW_STRIDE IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST
 screen.IRLITE_TOON_SETTINGS=<empty> <empty> IRLITE_TOON IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
-screen.IRLITE_OUTLINE_SETTINGS=<empty> <empty> IRLITE_OUTLINE <empty> <empty> IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER <empty> <empty> IRLITE_OUTLINE_BACK <empty> IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
+screen.IRLITE_OUTLINE_SETTINGS=<empty> <empty> IRLITE_OUTLINE IRLITE_OUTLINE_TARGET <empty> <empty> IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER <empty> <empty> IRLITE_OUTLINE_BACK <empty> IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 replace "RETRO_FILTER_DEPTH WORLD_CURVATURE_SIZE"
 <<<
-RETRO_FILTER_DEPTH WORLD_CURVATURE_SIZE IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SPECULAR_SMOOTHNESS IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_VL_SHADOW_STRIDE IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
+RETRO_FILTER_DEPTH WORLD_CURVATURE_SIZE IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SPECULAR_SMOOTHNESS IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_SHADOW_NORMAL_OFFSET IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_VL_SHADOW_STRIDE IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_TARGET IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 
 # --- option labels + tooltips ---
@@ -1350,6 +1375,12 @@ screen.IRLITE_OUTLINE_SETTINGS.comment=Light-driven rim outline along IRLite-lit
 
 option.IRLITE_OUTLINE=§eBacklight Rim
 option.IRLITE_OUTLINE.comment=Master toggle for the light-driven rim outline (depth silhouette + glow), tinted by the light colour. Off by default. Sub-features toggle below.
+
+option.IRLITE_OUTLINE_TARGET=§eOutline Target
+option.IRLITE_OUTLINE_TARGET.comment=Which surfaces the rim outline draws on. Both = entities and blocks; Only Entities = mobs/players/morphs/items; Only Blocks = terrain and block entities. Uses the pack's entity gbuffer tag.
+value.IRLITE_OUTLINE_TARGET.0=§eBoth
+value.IRLITE_OUTLINE_TARGET.1=§eOnly Entities
+value.IRLITE_OUTLINE_TARGET.2=§eOnly Blocks
 
 option.IRLITE_OUTLINE_STRENGTH=§eRim Strength
 option.IRLITE_OUTLINE_STRENGTH.comment=Rim brightness multiplier. 0.65 matches the IRLite diffuse scale.

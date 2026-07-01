@@ -5,6 +5,7 @@ import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.client.BBSRendering;
 import mchorse.bbs_mod.client.BBSShaders;
 import mchorse.bbs_mod.forms.CustomVertexConsumerProvider;
+import mchorse.bbs_mod.forms.forms.BodyPart;
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.renderers.FormRenderer;
 import mchorse.bbs_mod.forms.renderers.FormRenderType;
@@ -51,7 +52,19 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
         if (!context.isPicking() && !context.ui && !BBSRendering.isIrisShadowPass()
             && (context.type == FormRenderType.MODEL_BLOCK || context.type == FormRenderType.ENTITY))
         {
-            if (!LightCollector.isHandledByScanner(context))
+            // A bone-attached light (its form is parented to a BodyPart with a
+            // non-empty bone) is ALWAYS skipped by the scanner walk — the scanner
+            // runs in clean world coords and has no rig pose to place the bone, so
+            // it delegates bone parts to this render-path. But the scanner also
+            // *owns* whole contexts (MODEL_BLOCK, dashboard-roster ENTITY) and we'd
+            // normally yield to it; for a bone-attached light that means neither
+            // path registers it and it never lights. So force render-path ownership
+            // whenever the light hangs off a bone. Dedup by form identity in
+            // LightRegistry keeps this from double-registering.
+            boolean boneAttached = this.form.getParent() instanceof BodyPart part
+                && !part.bone.get().isEmpty();
+
+            if (boneAttached || !LightCollector.isHandledByScanner(context))
             {
                 this.registerLight(context);
             }

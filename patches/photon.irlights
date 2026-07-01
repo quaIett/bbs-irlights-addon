@@ -39,6 +39,7 @@
 #define IRLITE_TOON_SMOOTH 0.10 // [0.0 0.05 0.10 0.20 0.30 0.50]
 
 //#define IRLITE_OUTLINE                    // backlight rim outline (depth-edge x Fresnel), from IRLEngine LocalLightOutline
+#define IRLITE_OUTLINE_TARGET 0 // [0 1 2]   // which surfaces the rim draws on: 0 both, 1 entities only, 2 blocks only (same codes as per-light lightMask)
 #define IRLITE_OUTLINE_PIXEL_SIZE 2 // [1 2 3 4 5 6]
 #define IRLITE_OUTLINE_STRENGTH 0.65 // [0.0 0.1 0.2 0.35 0.5 0.65 0.8 1.0 1.5 2.0 3.0]
 #define IRLITE_OUTLINE_FRESNEL_POWER 2.2 // [1.0 1.2 1.5 1.8 2.0 2.2 2.5 3.0 4.0]
@@ -464,11 +465,22 @@ void irlite_lightSurface(vec3 fragWorld, vec3 normal, vec3 viewDir, Material mat
 
     #ifdef IRLITE_OUTLINE
         // depth-edge x Fresnel silhouette + optional soft inner Fresnel halo, shared by all lights (per fragment)
-        float irlFres = pow(clamp01(1.0 - abs(dot(n, v))), IRLITE_OUTLINE_FRESNEL_POWER);
-        float contourFactor = irlite_outlineFactor() * irlFres;
-        #ifdef IRLITE_OUTLINE_GLOW
-            contourFactor += IRLITE_OUTLINE_GLOW_STRENGTH * irlFres;
+        // target filter (0 both / 1 entities / 2 blocks, like lightMask): compile-time gate, skips the costly edge detect for the wrong surface type
+        bool irliteODraw = true;
+        #if IRLITE_OUTLINE_TARGET == 1
+            irliteODraw = nonTerrain;       // entities only
+        #elif IRLITE_OUTLINE_TARGET == 2
+            irliteODraw = !nonTerrain;      // blocks only
         #endif
+        float contourFactor = 0.0;
+        if (irliteODraw)
+        {
+            float irlFres = pow(clamp01(1.0 - abs(dot(n, v))), IRLITE_OUTLINE_FRESNEL_POWER);
+            contourFactor = irlite_outlineFactor() * irlFres;
+            #ifdef IRLITE_OUTLINE_GLOW
+                contourFactor += IRLITE_OUTLINE_GLOW_STRENGTH * irlFres;
+            #endif
+        }
     #endif
 
     for (uint i = 0u; i < count; i++)
@@ -943,12 +955,12 @@ screen.irlite_specular   = IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY
 screen.irlite_volumetric = IRLITE_VOLUMETRIC IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_MAX_DIST IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS
 screen.irlite_shadows    = IRLITE_SHADOWS IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS
 screen.irlite_toon       = IRLITE_TOON IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
-screen.irlite_outline    = IRLITE_OUTLINE IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
+screen.irlite_outline    = IRLITE_OUTLINE IRLITE_OUTLINE_TARGET IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 
 replace "DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS"
 <<<
-DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
+DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_SHADOW_QUALITY IRLITE_SHADOW_SIZE IRLITE_SHADOW_BIAS IRLITE_VL_INTENSITY IRLITE_VL_STEPS IRLITE_VL_TIP_BOOST IRLITE_VL_TIP_RADIUS IRLITE_VL_MAX_DIST IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH IRLITE_OUTLINE_TARGET IRLITE_OUTLINE_PIXEL_SIZE IRLITE_OUTLINE_STRENGTH IRLITE_OUTLINE_FRESNEL_POWER IRLITE_OUTLINE_BACK IRLITE_OUTLINE_FRONT_STRENGTH IRLITE_OUTLINE_GLOW_STRENGTH
 >>>
 
 replace "iris.features.optional = CUSTOM_IMAGES ENTITY_TRANSLUCENT"
@@ -1007,6 +1019,11 @@ option.IRLITE_TOON_SMOOTH              = §aToon Smoothing
 
 option.IRLITE_OUTLINE                  = §eOutline
 option.IRLITE_OUTLINE.comment          = Master toggle: light-driven rim outline (depth silhouette + glow) in the light's colour. Off by default. Sub-features toggle below.
+option.IRLITE_OUTLINE_TARGET           = §eOutline Target
+option.IRLITE_OUTLINE_TARGET.comment   = Which surfaces the rim outline draws on. Both = entities and blocks; Only Entities = mobs/players/items/hand/BBS morphs; Only Blocks = terrain and block entities. Uses the pack's gbuffer entity flag.
+value.IRLITE_OUTLINE_TARGET.0          = §eBoth
+value.IRLITE_OUTLINE_TARGET.1          = §eOnly Entities
+value.IRLITE_OUTLINE_TARGET.2          = §eOnly Blocks
 option.IRLITE_OUTLINE_PIXEL_SIZE       = §eLine Width
 option.IRLITE_OUTLINE_PIXEL_SIZE.comment = Pixel thickness of the rim edge detection
 option.IRLITE_OUTLINE_STRENGTH         = §eLine Strength

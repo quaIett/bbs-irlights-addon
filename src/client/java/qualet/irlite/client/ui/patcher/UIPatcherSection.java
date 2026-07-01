@@ -273,7 +273,7 @@ public final class UIPatcherSection
             return;
         }
 
-        String outName = outputName(selectedPack);
+        String outName = outputName(selectedPack, parsed);
         Path source = Shaderpacks.packPath(selectedPack);
         Path output = Shaderpacks.dir().resolve(outName);
         PatchResult result = IrlPatchApplier.apply(source, output, parsed);
@@ -291,14 +291,14 @@ public final class UIPatcherSection
         }
     }
 
-    private static String outputName(String packName)
+    private static String outputName(String packName, IrlPatch patch)
     {
         String base = packName;
         if (base.toLowerCase().endsWith(".zip"))
         {
             base = base.substring(0, base.length() - 4);
         }
-        base = base + "_IRLights";
+        base = base + "_IRLights" + (patch.dof ? "+DOF" : "");
 
         if (!createNew)
         {

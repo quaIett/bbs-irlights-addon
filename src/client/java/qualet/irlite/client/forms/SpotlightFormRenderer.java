@@ -12,6 +12,7 @@ import org.joml.Vector3d;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 import qualet.irlite.client.light.IRLightPositionResolver;
+import qualet.irlite.client.light.cookie.CookieArray;
 import org.qualet.irl.light.LightMath;
 import org.qualet.irl.light.LightRegistry;
 import qualet.irlite.forms.SpotlightForm;
@@ -101,6 +102,17 @@ public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightFo
         float cosOuter = cone.cosOuter();
         float cosInner = cone.cosInner();
 
+        // Resolve the gobo texture (BBS Link) to its texture-array layer, exactly as
+        // the scanner path does in LightCollector.emitSpot. Without this the render
+        // path called the no-cookie registerSpot overload (cookie forced to layer -1),
+        // so a spotlight registered here — a live actor, an in-world film replay, or a
+        // light hung off a BodyPart bone (which the scanner always skips and delegates
+        // to this path) — never projected its cookie. -1 = no mask, cookie OFF unless a
+        // texture is picked. Rotation is stored in degrees on the form -> radians here.
+        int cookieLayer = CookieArray.resolve(this.form.cookie.get());
+        float cookieRot = (float) Math.toRadians(this.form.cookieRotation.get());
+        float cookieFlags = this.form.cookieInvert.get() ? 1F : 0F;
+
         Color c = this.form.color.get();
         LightRegistry.registerSpot(
             p.x, p.y, p.z,
@@ -111,6 +123,7 @@ public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightFo
             this.form.entitiesOnly.get(), this.form.blocksOnly.get(),
             this.form.anisotropy.get(), this.form.vlDensity.get(), this.form.beamStrength.get(),
             this.form.bulbSize.get(), this.form.shadows.get(),
+            (float) cookieLayer, cookieRot, this.form.cookieScale.get(), cookieFlags,
             System.identityHashCode(this.form)
         );
     }

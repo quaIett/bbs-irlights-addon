@@ -1828,12 +1828,8 @@ replace "Pack2xU8_to_U16(vec2(parallaxShadow, v_materialIDs / 255.0))"
 Pack2xU8_to_U16(vec2(parallaxShadow, (v_materialIDs + 128.0) / 255.0))
 >>>
 
-# --- Iris: enable SSBO + the IRLite settings screens ---
+# --- Iris: the IRLite settings screens (pack already declares the SSBO feature) ---
 @file shaders/shaders.properties
-replace "iris.features.required=CUSTOM_IMAGES"
-<<<
-iris.features.required=CUSTOM_IMAGES SSBO
->>>
 replace "[SHORTCUT]          [MOD_SUPPORT] \\"
 <<<
 [IRLIGHTS]          <empty> \
@@ -1844,7 +1840,7 @@ after "screen.LIGHTING=[LIGHT_SOURCE] [HELDLIGHT] [SHADOW]"
 
 	screen.IRLIGHTS = <empty> <empty> IRLITE_DIFFUSE IRLITE_INTENSITY IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY IRLITE_VOLUMETRIC <empty> <empty> IRLITE_TOON <empty> IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH <empty> <empty> IRLITE_SHADOWS
 >>>
-after "sliders=PT_VOXEL_RESOLUTION \\"
+after "sliders=PT_VOXEL_RESOLUTION_X PT_VOXEL_RESOLUTION_Y \\"
 <<<
 	IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH \
 >>>

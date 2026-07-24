@@ -60,7 +60,6 @@ if (-not $ef.Contains('Pack2xU8_to_U16(vec2(parallaxShadow, (v_materialIDs + 128
 # shaders.properties: features flag, main-screen entry, screen tree, sliders
 $pr  = Lines "$mod\shaders.properties"
 $prO = Lines "$org\shaders.properties"
-[void](IndexOfLine $pr 'iris.features.required=CUSTOM_IMAGES SSBO')
 $shIdx = -1
 for ($i = 0; $i -lt $pr.Count; $i++) { if ($pr[$i].Contains('[IRLIGHTS]')-and $pr[$i].Contains('<empty>')) { $shIdx = $i; break } }
 if ($shIdx -lt 0) { throw "main-screen [IRLIGHTS] line not found" }
@@ -79,7 +78,7 @@ $prTree = $pr[($scAnc + 1)..$treeEnd]
 if ($prTree[0] -cne '') { throw "screen tree must start with a blank line" }
 if (-not $prTree[1].StartsWith($T + 'screen.IRLIGHTS')) { throw "screen tree head unexpected" }
 if ($prTree -match 'screen\.IRLIGHTS_(SPECULAR|SHADOWS|TOON|VOLUMETRIC|OUTLINE)') { throw "flat screen must carry no IRLIGHTS sub-screens" }
-$slAncText = 'sliders=PT_VOXEL_RESOLUTION \'
+$slAncText = 'sliders=PT_VOXEL_RESOLUTION_X PT_VOXEL_RESOLUTION_Y \'
 $slAnc = IndexOfLine $pr $slAncText
 $slBody = $pr[$slAnc + 1]
 if (-not $slBody.StartsWith($T + 'IRLITE_INTENSITY')) { throw "sliders body head unexpected" }
@@ -139,10 +138,8 @@ Emit '@file shaders/Lib/Programs/Gbuffers/Entities_FS.glsl'
 Emit 'replace "Pack2xU8_to_U16(vec2(parallaxShadow, v_materialIDs / 255.0))"'
 EmitBody @('Pack2xU8_to_U16(vec2(parallaxShadow, (v_materialIDs + 128.0) / 255.0))')
 Emit ''
-Emit '# --- Iris: enable SSBO + the IRLite settings screens ---'
+Emit '# --- Iris: the IRLite settings screens (pack already declares the SSBO feature) ---'
 Emit '@file shaders/shaders.properties'
-Emit 'replace "iris.features.required=CUSTOM_IMAGES"'
-EmitBody @('iris.features.required=CUSTOM_IMAGES SSBO')
 Emit ('replace "' + $shAnchor.Replace('\', '\\') + '"')
 EmitBody @($shBody1, $shLine2)
 Emit ('after "' + $scAncText + '"')

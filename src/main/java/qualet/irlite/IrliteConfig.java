@@ -39,6 +39,7 @@ public final class IrliteConfig
     public static ValueFloat outlineGlowStrength;
     public static ValueBoolean shadowsLive;
     public static ValueFloat shadowSoftness;
+    public static ValueBoolean shadowPartialTile;
 
     private IrliteConfig()
     {}
@@ -98,6 +99,17 @@ public final class IrliteConfig
     public static float shadowPoseReach()
     {
         return 1.0F;
+    }
+
+    /** Partial-tile spot overlay: on a steady overlay frame only the moving
+     *  subject's projected rect is copied, redrawn and refiltered instead of the
+     *  whole tile. The rect is built from caster HITBOXES (+ the pose slack), so
+     *  a form drawn far past its hitbox can clip at the rect edge, moving with
+     *  the subject — switch OFF to trade that risk for the full-tile per-frame
+     *  cost. Default on. */
+    public static boolean shadowPartialTile()
+    {
+        return shadowPartialTile == null || shadowPartialTile.get();
     }
 
     /** Max lights uploaded to the shader SSBO per frame; the injected shader loops

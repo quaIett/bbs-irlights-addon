@@ -93,6 +93,9 @@ public class L10nMixin
         self.getKey("irlights.config.shadows.shadows_live", "Light shadows");
         self.getKey("irlights.config.shadows.shadows_live-comment", "Cast shadows from IRLights lights. Applies instantly every frame without reloading the shaderpack. With this off (and beam shadows off too) the mod also stops baking the shadow maps, so it recovers the bake cost and VRAM, not just the on-screen shadows. This is the everyday on/off — the shaderpack also has its own IRLITE_SHADOWS option, but that one is a compatibility escape hatch that strips the shadow code out of the compiled shader. Only affects shaderpacks patched with runtime globals.");
 
+        self.getKey("irlights.config.shadows.shadow_partial_tile", "Partial shadow updates");
+        self.getKey("irlights.config.shadows.shadow_partial_tile-comment", "Speed-up for moving subjects near spot lights: each frame only the subject's projected rectangle of the shadow map is redrawn and refiltered instead of the whole tile. The rectangle is sized from hitboxes, so a form drawn much bigger than its hitbox can get its shadow edge cut at the rectangle border, shifting as the subject moves. Switch OFF while filming oversized forms; the cost is a full-tile update every frame per spot with a moving subject.");
+
         self.getKey("irlights.config.shadows.shadow_softness", "Softness");
         self.getKey("irlights.config.shadows.shadow_softness-comment", "Apparent size of the light source, which sets how fast the shadow edge spreads with distance from whatever casts it — contact stays sharp, far shadows go soft. 0 gives hard edges everywhere. A light with its own bulb size set ignores this and uses that. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
 

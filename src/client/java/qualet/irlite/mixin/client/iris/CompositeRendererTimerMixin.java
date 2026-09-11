@@ -11,6 +11,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import qualet.irlite.client.diag.VlProfiler;
+import qualet.irlite.client.diag.ProfileCapture;
 
 import java.util.function.Supplier;
 
@@ -43,6 +44,7 @@ public class CompositeRendererTimerMixin
                                        CallbackInfoReturnable<Program> cir)
     {
         VlProfiler.registerPassName(cir.getReturnValue(), source.getName());
+        if (cir.getReturnValue() != null) ProfileCapture.programSource(source);
     }
 
     @Redirect(method = "renderAll",

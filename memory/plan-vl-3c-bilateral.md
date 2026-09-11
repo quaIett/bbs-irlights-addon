@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 1a47d7b9-f46d-49f3-a5ce-79b7f33d8d56
+  modified: 2026-07-20T11:06:59.900Z
 ---
 
 # VL 3c: bilateral upsample + полурез
@@ -15,6 +16,9 @@ metadata:
 1. Метрика глубины = ИСТИННАЯ view-Z: nf/(f − z(f−n)), НЕ GetLinearDepth*far пака (тот = 2df/(d+f) → сигма дрейфовала бы ×0.5 у камеры / ×2 у far). Сигма честно в блоках, дефолт 1.5, оверрайд irlite_vlD.y (0=дефолт; сеттера в Java НЕТ — y пишется 0, мёртвого пламбинга не добавляли).
 2. Depth-fetch с bias +0.25: ivec2(tapUv*view + 0.25) — texel-центр low-res при R=0.5/0.25 попадает РОВНО на угол full-res пикселей (2t+1), float-округление флипало выбор по колонкам (13/960 на 1920w); bias детерминирует пиксель внутри footprint, при R=1.0 floor(t+0.75)=t — маппинг не меняется.
 3. bit6-off путь = буквально прежний texture2D (бит-идентичность); degenerate-фолбэк wsum<1e-3 → чистый bilinear.
+
+## БОЕВОЙ ПАК (уточнение юзера 2026-07-20)
+Актуальный/боевой пак = **`bbs-irlights-addon/run/shaderpacks/ComplementaryReimagined_IRLights`** (dev-копия под runClient), НЕ prism-форк. Следствия: оверрайда IRLITE_VL_RESOLUTION в его .txt нет → действует дефолт дефайна **0.5** (irlite_lights.glsl:41), bilateral bit6 в GLSL есть → **полурез + bilateral боевые, рычаг снят**. Устаревшая формулировка ниже («у юзера стоит 1.0», «рекомендация переключить») относилась к prism-форку ComplementaryReimagined_IRLights+DOF (там 1.0 намеренно, старое поколение) — это отставшая копия, не эталон замеров.
 
 ## ОТКРЫТОЕ ПОСЛЕ 3c
 - Тираж bilateral на остальные паки (Photon = MISS by design). ВАЖНО: у юзера в prism живёт форк ComplementaryReimagined_IRLights+DOF = СТАРОЕ поколение IRLite (либа без F0/F1/F2 и UBO-эры, deferred2 без blue-noise) — слепой синк 3 файлов СЛОМАЕТ его, нужен полный re-patch; его конфиг оставлен на RESOLUTION=1.0 намеренно. BSL_IRLights+DOF.txt держит RESOLUTION=100 (процентная шкала BSL — не трогали).

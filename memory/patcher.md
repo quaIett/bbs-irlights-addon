@@ -8,6 +8,7 @@ metadata:
   consolidated: 2026-06-18
   type: reference
   originSessionId: 7caee3ab-d073-4ed1-bfcf-8daae6a18007
+  modified: 2026-07-24T10:34:53.089Z
 ---
 
 IRLite shader patcher (injects IRLite GLSL into an Iris shaderpack). Parent: [[MEMORY]]. Consumes contracts from [[addon-light-buffer-ssbo]] (SSBO binding 7) + [[addon-iris-integration]] (sampler names). UI hooked via [[addon-ui-config]] (irlite_patcher category). Code: src/client/java/qualet/irlite/client/patcher/ (IrlPatch, IrlPatchParser, PatchEngine, IrlPatchApplier, PatchResult + PatchLibrary/Shaderpacks) + ui/patcher/UIPatcherSection.
@@ -86,7 +87,7 @@ Discovery / IO
 - Shaderpacks: dir via Iris.getShaderpacksDirectory() (fallback <gameDir>/shaderpacks); list() via Iris enumerate() with a direct dir-scan fallback (folders + .zip). packPath(name).
 - The repo's canonical patches: patches/{iterationrp,photon,complementaryreimagined,bsl,solas,bliss}.irlpatch —
   all carry @irlite 1 since 2026-06-12 (bsl also @packversion v10, bliss @packversion V2.1.2); generators
-  tools/gen-*-patch.ps1 emit the headers (photon has NO generator — hand-edit). Op counts: iterationrp 12,
+  tools/gen-*-patch.ps1 emit the headers (photon has NO generator — hand-edit). Op counts: iterationrp 11,
   photon 20, complementaryreimagined 21, bsl 26, solas 19, bliss 16. run/irlite/patches refreshed with all 6.
 
 Settings UI (UIPatcherSection.append, "irlite_patcher" settings category)
@@ -98,14 +99,20 @@ Settings UI (UIPatcherSection.append, "irlite_patcher" settings category)
 - Toggle "Create new pack each time"; UI.row(Validate, Patch) buttons: Validate = dry-run (nothing written),
   Patch = apply. runPatch accepts FOLDER or ZIP source. Output name = "<pack minus .zip>_IRLite" (or _2, _3... if createNew). Full log -> "irlite" logger;
   one-line colored status (green/red).
-- In-game check of the reworked UI still PENDING (offline-validated only).
+- In-game VERIFIED 2026-07-23 (runClient 1.20.4, user). CUT-OFF FIX (irlite master commit 2e1b7b3): status + meta
+  lines now UIText (word-wrap onto multiple lines + self-size height via getParentContainer().resize()), NOT UILabel.
+  Root cause: UILabel.render() calls font.limitToWidth -> truncates to ONE line with "..." — in the narrow BBS
+  settings panel this clipped long failed-patch error messages AND the target-pack name in the meta line
+  ("...for a different shaderpack (BSL)."), so the user saw neither the cause nor which pack to pick = soft-lock.
+  Editor PatcherPanel is NOT affected (already wraps via Widgets.textColoredWrapped). Addon-only, irl-core untouched.
+  General rule: BBS UILabel = single-line truncating; UIText = multi-line word-wrap (font.wrap) + auto-height.
 
-CURRENT IterationRP PATCH (patches/iterationrp.irlpatch) — the take-3 NEW-GEN since 2026-06-12 (commit 6f1de30; the old June-06 generation survives in git history). 12 ops, ALL anchors single-line; before-op anchors carry their leading tabs as \t escapes (byte-exact applier output); generator = tools/gen-iterationrp-patch.ps1 (body-splice from Shadres/Modification/IterationRP + boundary asserts), validated via tools/PatchHarness.java applier-vs-Modification diff-clean. NO OUTLINE (the outline GLSL block breaks IterationRP by mere presence — see [[shader-iterationrp-pipeline]]). Contents:
+CURRENT IterationRP PATCH (patches/iterationrp.irlights) — take-3 NEW-GEN since 2026-06-12; RETARGETED 2026-07-24 to iterationRP **0.8.26** (was 0.8.24). 11 ops (was 12): two upstream drifts fixed — (a) sliders anchor `sliders=PT_VOXEL_RESOLUTION ` → `sliders=PT_VOXEL_RESOLUTION_X PT_VOXEL_RESOLUTION_Y ` (pack split voxel res into X/Y); (b) DROPPED the `iris.features.required=CUSTOM_IMAGES`→`+SSBO` replace-op entirely — 0.8.26 already declares `CUSTOM_IMAGES SSBO`, so the old op produced a `SSBO SSBO` duplicate. Also FSR2 tree moved `Lib/FSR2/`→`Lib/FidelityFX/FSR2/` (not a hook). GLSL contract intact (GbufferData/Material/SpecularGGX 4-arg+f0/VolumetricFog 7-arg all unchanged). ALL anchors single-line; before-op anchors carry their leading tabs as \t escapes (byte-exact applier output); generator = tools/gen-iterationrp-patch.ps1 (body-splice from Shadres/Modification/IterationRP + boundary asserts), validated via tools/PatchHarness.java applier-vs-Modification diff-clean. NO OUTLINE (the outline GLSL block breaks IterationRP by mere presence — see [[shader-iterationrp-pipeline]]). Contents:
 - +file shaders/Lib/irlite_lights.glsl : SSBO struct (binding 7), option #defines, merged diffuse+specular surface loop (IRLITE_SURFACE_PASS), gather-PCF spot atlas + point cube-array PCSS shadows, VL march with per-step strided shadows (IRLITE_VL_PASS).
 - @file shaders/Lib/Programs/Composite/Soild_FS.glsl : after include-anchor (+IRLITE_SURFACE_PASS), before/after the albedo+sunlightSpecular line (diffuse pre-albedo w/ bit-7 decode + bobbing-corrected positions, spec post-albedo).
 - @file shaders/Lib/Programs/Composite/Volumetric_FS.glsl : after include-anchor (+IRLITE_VL_PASS), after the VolumetricFog call (bobbed-eye-origin VL add).
 - @file shaders/Lib/Programs/Gbuffers/Entities_FS.glsl : replace (+128 materialID bit-7 flag).
-- @file shaders/shaders.properties : replace x2 (SSBO feature flag; [IRLITE] main-screen entry) + after x2 (screen tree; sliders).
+- @file shaders/shaders.properties : replace x1 ([IRLIGHTS] main-screen entry; SSBO-feature replace dropped for 0.8.26) + after x2 (screen tree; sliders).
 - @file shaders/lang/en_us.lang : after (colour-coded labels + tooltips).
 Settings screen path in-game: Iris -> Shader Pack Settings -> [IRLights] on the main page, or Lighting -> IRLights.
 

@@ -51,6 +51,8 @@ import org.joml.Matrix3f;
 import org.joml.Vector3f;
 import qualet.irlite.IrliteConfig;
 import qualet.irlite.client.light.LightCollector;
+import qualet.irlite.client.light.BbsModelSilhouette;
+import qualet.irlite.client.light.BbsMobSilhouette;
 import qualet.irlite.forms.PointLightForm;
 import qualet.irlite.forms.SpotlightForm;
 import qualet.irlite.mixin.client.bbs.FilmsAccessor;
@@ -77,8 +79,8 @@ import java.util.List;
  *       {@link FormRenderer}.</li>
  * </ul>
  *
- * <p>The orchestration ({@link ShadowBaker}/{@link ShadowRenderer}) is
- * variant-agnostic and unchanged; this is the only IRLite-specific file. See
+ * <p>The orchestration ({@link ShadowBaker}/{@link ShadowRenderer}) remains
+ * BBS-free; optional silhouette helpers evaluate supported revision paths. See
  * {@code irl-core/docs/shadow-caster-seam-spec.md} for the 5 invariants. Source-side
  * BBS reflection/accessor try/catch lives INSIDE {@code collect} (INVARIANT 4
  * scoping); the {@code emitOccluder} draw arms NEVER catch — a throw propagates
@@ -86,6 +88,16 @@ import java.util.List;
  */
 public final class IRLiteBbsCasterSource implements ShadowCasterSource
 {
+    private final BbsModelSilhouette silhouettes = new BbsModelSilhouette();
+    private final BbsMobSilhouette mobSilhouettes = new BbsMobSilhouette();
+
+    @Override
+    public CasterRevision revision(Object caster, int type, float tickDelta)
+    {
+        if (type != CasterType.MODEL_BLOCK || !(caster instanceof ModelBlockEntity block)) return CasterRevision.UNKNOWN;
+        return block.getProperties() != null && block.getProperties().getForm() instanceof mchorse.bbs_mod.forms.forms.MobForm
+            ? mobSilhouettes.sample(block, tickDelta) : silhouettes.sample(block, tickDelta);
+    }
     /** Match the light collector's camera horizon. This removes the old 72-block
      *  mismatch for co-located lamp/caster scenes; the global bounded pool remains
      *  intentionally camera-prioritized for casters beyond this horizon. */
@@ -110,6 +122,7 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     @Override
     public void collect(ClientWorld world, Vec3d camPos, float tickDelta, OccluderSink sink)
     {
+        silhouettes.beginFrame();
         double camX = camPos.x, camY = camPos.y, camZ = camPos.z;
 
         // --- Arm 1: world entities (vanilla / BBS-morph render path) ---

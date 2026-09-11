@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 16d38abd-7219-4f5d-90b9-26c73f8fdadf
+  modified: 2026-07-22T11:38:23.576Z
 ---
 
 Карта «что-где менять» (routing-by-area). Читай эту память ПЕРВОЙ, когда пользователь говорит «поменяй X / добавь Y» без указания проекта. Здесь — таблицы маршрутизации; за деталями архитектуры иди в [[project-irl-sync-strategy]], правила теней в [[plan-irl-core-shadow-extraction]].
@@ -68,7 +69,7 @@ Iris-миксины:
 | Файл | Где, как |
 |---|---|
 | SamplerBindingCubeArrayMixin | rename-only различия — по факту шарится; держи per-mod копию (Loom AW требует, чтоб миксин был в репо мода) |
-| ProgramSamplersBuilderMixin | версионный — Iris 1.7.2 = 2-arg addDynamicSampler; Iris 1.10.7 (порт) = 4-arg (TextureType, supplier, ()->null, name). Per-mod И per-version, НИКОГДА не шарить. |
+| ProgramSamplersBuilderMixin | КОРРЕКЦИЯ 2026-07-22 (understand-wf, byte-diff): миксин НЕЙТРАЛЕН — байт-идентичен master↔port/1.21.1, арность addDynamicSampler вынесена в core `org.qualet.irl.light.iris.IrlSamplersBind`. Порт 1.21.1 = Iris **1.8.8 (2-arg)**, НЕ 1.10.7/4-arg. Тираж миксина НЕ требуется; версионность живёт в core IrlSamplersBind. (Старый факт «Iris 1.10.7 4-arg, per-version, не шарить» — устарел.) |
 
 Редактор / UI / ImGui:
 | Что меняешь | Куда |
@@ -85,7 +86,7 @@ Quick rules (запомнить дословно):
 - UI / гайды / gizmo / ImGui -> только redactor.
 - Iris-миксины -> per-mod, версионные; не пытайся шарить.
 - Тени на 1.21.11 — отдельный мир на уровне ЯДРА (ветка core 1.21.11 = raw-GL бэкенд + шов RawOccluderBatch вместо Immediate; см. [[project-port-12111-refresh]]); у редакторских порт-веток СВОИХ shadow-деревьев больше нет (E3 закрыт). port/1.21.1 — near-lockstep с main.
-- Java toolchain: core main 1.20.4 = Java17 / Loom 1.9; ветки core 1.21.x = Java 21 / Loom 1.15.5. Редактор: main+port/1.20.1 = Loom 1.9, порты 1.21.x = Loom 1.15.5. Аддон = Loom 1.15.5. JDK 21 = C:/Program Files/Eclipse Adoptium/jdk-21.0.11.10-hotspot (системный JAVA_HOME = JVM 8 — gradlew всегда запускать с явным JAVA_HOME).
+- Java toolchain: core main 1.20.4 = Java17 / Loom 1.9; ветки core 1.21.x = Java 21 / Loom 1.15.5. Редактор: main+port/1.20.1 = Loom 1.9, порты 1.21.x = Loom 1.15.5. Аддон = Loom 1.15.5. JDK (пути ПЕРЕПРОВЕРЕНЫ 2026-09-10, старые jdk-17.0.19.10/jdk-21.0.11.10 больше не существуют): JDK 17 = `C:/Program Files/Eclipse Adoptium/jdk-17.0.20.101-hotspot`, JDK 21 = `C:/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot` (рядом лежат `.8`-сборки обеих). Системный JAVA_HOME = JVM 8 — gradlew ВСЕГДА запускать с явным JAVA_HOME ([[project-workstation-resync-2026-09-10]]).
 
 Ключевые инструменты:
 | Команда | Цель |

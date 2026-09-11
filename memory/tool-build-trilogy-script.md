@@ -4,9 +4,11 @@ description: "BBS/build-trilogy.ps1 (ПЕРЕПИСАН 2026-07-08, вне ре�
 metadata:
   node_type: memory
   type: project
+  originSessionId: b380c6ee-dcda-4c14-bee0-bc277499a549
+  modified: 2026-07-24T11:35:08.921Z
 ---
 
-build-trilogy.ps1 лежит в C:\Users\Qualet\Documents\Project\Minecraft\BBS\build-trilogy.ps1 (родительская папка BBS, вне git). ПОЛНОСТЬЮ ПЕРЕПИСАН 2026-07-08 (старый чекаут-скрипт от 2026-06-20 умер вместе с до-Ф2 реальностью; бэкап в scratchpad сессии a4cbd228). Боевой прогон 2026-07-08: 13/13 таргетов OK за 2063s (полный, холодные worktree).
+build-trilogy.ps1 лежит в C:\Users\Qualet\Documents\Project\Minecraft\BBS\build-trilogy.ps1 (родительская папка BBS, вне git). ПОЛНОСТЬЮ ПЕРЕПИСАН 2026-07-08 (старый чекаут-скрипт от 2026-06-20 умер вместе с до-Ф2 реальностью; бэкап в scratchpad сессии a4cbd228). Боевой прогон 2026-07-08: 13/13 таргетов OK за 2063s (полный, холодные worktree). Повторный прогон 2026-07-24 (`-Version 1.1.5`): 13/13 OK за 1372s (тёплые worktree/кэш); все 8 продукт-jar 1.1.5 в Desktop/IRLights, JiJ = ровно 1 core-1.1.5. Ключ: `-Version 1.1.5` (или BBS/VERSION=1.1.5) — скрипт сам штампует во все worktree, git-бамп веток для сборки НЕ нужен ([[reference-core-versioning]]).
 
 Запуск (PowerShell): & 'C:\Users\Qualet\Documents\Project\Minecraft\BBS\build-trilogy.ps1' [-Lines 1.21.11] [-Dest ...] [-JavaHome ...] [-KeepWorktrees]. Дефолты: все 5 линий; Dest=C:/Users/Qualet/Desktop/IRLights; JavaHome=C:/Program Files/Eclipse Adoptium/jdk-21.0.11.10-hotspot. Одна линия ~5-8 мин, все пять ~35-45 мин.
 

@@ -6,6 +6,7 @@ metadata:
   type: project
   mod_scope: irl-core-shared
   originSessionId: 4095e1bc-3ce4-4ec9-b3ec-beb57306ce84
+  modified: 2026-07-22T23:37:24.715Z
 ---
 
 Гобо/cookie-маска для спотлайта — план.
@@ -70,3 +71,9 @@ irl-core контракт УЖЕ общий (Ф0 в ядре на main@8592fc9, 
 - Roll: базис up даёт произвольный крен -> параметр поворота обязателен; для совпадения с тенью использовать ТОТ ЖЕ базис, что irlite_spotShadow.
 
 Команды: irl-core gradlew build (после правки ядра) -> redactor gradlew build. Текущая ветка redactor = MC-версия.
+
+ЗЕРКАЛО COOKIE ИСПРАВЛЕНО (2026-07-23, рантайм PASS): гобо проецировался горизонтально-ЗЕРКАЛЬНО относительно исходного PNG — базис конуса `irlite_cookie` левосторонний (`s=cross(ld,up)`, `u=cross(s,ld)` -> `s×u=-ld`), горизонтальная ось NDC зеркалит. ФИКС В ОДНОЙ ТОЧКЕ: `CookieArrayBase.decode()` (irl-core) — новый приватный `flipHorizontal(ByteBuffer)` реверсит RES×RES (512²) R8-буфер по горизонтали (absolute get/put — position/limit не трогает, upload читает как есть) перед `return resized`. Одна правка Java чинит ВСЕ 7 паков И оба мода (общий `irl_cookieArray`); `.irlights`/GLSL НЕ трогались (в отличие от негейта ndcX в каждом паке = мина реген-потери). User-решение: КНОПКА отклонена (это баг, не фича; +бит в `cookie.w` = байт-синк struct в 7 паках + UI). Побочка (принято): слайдер `cookie.y` rotation крутит визуально в обратную сторону (mirror меняет киральность) — косметика. Коммит irl-core **main = 6cebbc5** (НЕ запушен). Байт-верификация `flipHorizontal`: ~/.m2 jar + loom-remap jar аддона + вложенные core в собранных jar'ах. `CookieArrayBase` байт-идентичен на всех core-ветках (main/1.21.1/1.21.4/1.21.11) -> будущий порт = чистый cherry-pick 6cebbc5; редакторный `CookieArray extends CookieArrayBase` -> наследует фикс без правок кода.
+
+ТИРАЖ (директива user 2026-07-23: ТОЛЬКО 1.20.x, 1.21.x НЕ трогать):
+- DONE: аддон `master` -Pmc=1.20.4 (рантайм PASS у user, узор не зеркалит) + -Pmc=1.20.1 (nested `irl-core-1.1.3.jar` verified); редактор `main` 1.20.4 (nested core verified). Оба репо пинят core **1.1.3** -> подхватили фикс пересборкой, ноль правок кода в модах.
+- ОТЛОЖЕНО (выбор user «Отложить»): `editor port/1.20.1` пинит core **1.1** (не 1.1.3) -> бамп до 1.1.3 затащил бы весь невыверенный core-дельта 1.1->1.1.3 (W2/VRAM/beam/block-rebake). Cookie-фикс поедет туда вместе с плановым тиражом core-1.1.3 на порт-ветки (отдельная сессия). Аддон `port/1.21.1` + редактор `port/1.21.4`/`port/1.21.11` = вне скоупа (1.21.x).

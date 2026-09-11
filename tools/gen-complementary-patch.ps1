@@ -7,10 +7,11 @@
 # <out> <Modification>` must be empty. See memory complementary-port-plan
 # Phase 5 + the VL perf-rework FOLLOW-UP (the added deferred2 pass ops).
 
+param([string]$ModifiedShaders, [string]$OutputPatch)
 $ErrorActionPreference = "Stop"
-$repo = "C:\Users\Qualet\Documents\Project\Minecraft\BBS\bbs-irlights-addon"
-$mod  = "$repo\Shadres\Modification\ComplementaryReimagined\shaders"
-$out  = "$repo\patches\complementaryreimagined.irlights"
+$repo = Split-Path -Parent $PSScriptRoot
+$mod = if ($ModifiedShaders) { $ModifiedShaders } else { Join-Path $repo 'Shadres/Modification/ComplementaryReimagined/shaders' }
+$out = if ($OutputPatch) { $OutputPatch } else { Join-Path $repo 'patches/complementaryreimagined.irlights' }
 
 function Lines($path) { [IO.File]::ReadAllLines($path) }
 function FileText($path) { [IO.File]::ReadAllText($path).Replace("`r`n", "`n") }

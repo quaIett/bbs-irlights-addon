@@ -1,12 +1,10 @@
 package qualet.irlite.client.forms;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import mchorse.bbs_mod.forms.renderers.FormRenderType;
 import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
 import mchorse.bbs_mod.ui.utils.icons.Icon;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Color;
-import org.joml.Matrix3fc;
 import org.joml.Matrix4f;
 import org.joml.Vector3d;
 import org.joml.Vector4f;
@@ -72,12 +70,11 @@ public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightFo
     @Override
     protected void registerLight(FormRenderingContext context)
     {
-        Vector3d p = IRLightPositionResolver.resolve(context);
+        Matrix4f matrix = new Matrix4f();
+        Vector3d p = IRLightPositionResolver.resolve(context, matrix);
 
         // Direction: local +Z through inverseViewRot * stack.peek (strips view roll),
         // matching the editor gizmo convention.
-        Matrix4f matrix = new Matrix4f((Matrix3fc) RenderSystem.getInverseViewRotationMatrix());
-        matrix.mul(context.stack.peek().getPositionMatrix());
         Vector4f forward = new Vector4f(0F, 0F, 1F, 0F);
         matrix.transform(forward);
         LightMath.normalizeDir(forward.x, forward.y, forward.z, 0F, 0F, 1F, forward);

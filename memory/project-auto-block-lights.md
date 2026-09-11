@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 77fc1d58-126f-427e-9bf3-1a4cea49c488
+  modified: 2026-07-23T00:49:12.850Z
 ---
 
 Auto block-lights («режим авто-света от блоков») — IRL-redactor, ВСЕ версии.
@@ -29,5 +30,7 @@ Notes:
 - Editor/FPS lag fix (2026-06-18): «включение autolight роняет imgui-редактор» = вся сцена ре-рендерится за редактором и ТЕНИ = per-pixel killer — пак делает ~28 PCSS-тапов на shadowed-свет на lit-пиксель (<=16 lights) + per-light cube-бейки. Unshadowed-света early-out в GLSL (vlParams.w<0 -> return 1.0, строки 141/258) и скипают бейк. Поэтому autoLightShadows по умолчанию OFF (illumination-only = плавно; тени включать осознанно). Стоимость illumination растёт с числом источников (per-fragment loop), но ALU-дёшево vs shadow-тапы. ДЕШЁВОГО способа рендерить много SHADOWED-светов НЕТ — forward per-light loop, без clustered/tiled cull.
 - Adversarial review (workflow, 13 agents) нашёл 8 реальных issue — все закрыты: manual-slot starvation (reserve), startup bake spike (ramp), over-broad occluder skip (host-cell scope + lockstep mirror), headroom cap, stale-after-shaders counter. Оставлено как acceptable/bounded: per-frame nearest() sort + dense-scene scan cost (throttled, dormant when off), stale count label when shaders off.
 - Builds green (gradlew compileClientJava/build); NOT yet visually validated in-world. Routing для «поменяй X» = [[reference-edit-routing-by-area]].
+
+Баг нумерации ручных источников (редактор, ФИКС 2026-07-23, irlights main b8068b1, рантайм PASS user 1.20.4, НЕ пушен): видимое имя ручного источника («Источник N») формировалось в LightEditorPanel.addLight() из глобального PlacedLight.id (NEXT_ID++ в конструкторе). AutoLightManager.upsert() создаёт PlacedLight.point() на КАЖДЫЙ эмиссивный блок (минт при появлении / эвикт при уходе из радиуса по rolling-скану) -> тот же NEXT_ID неограниченно растёт. Поэтому 2-й ручной источник, добавленный ПОСЛЕ включения auto-lights, прыгал на большой/линейно растущий номер вместо «Источник 2». id трогать нельзя (ключ shadow-кэшей tile/dirty/block) -> отвязали ИМЯ: addLight() -> nextSourceNumber() = наименьший свободный положительный номер среди дефолтно-именованных («Источник N»/«Source N», regex, оба языка, CASE_INSENSITIVE) источников в LightScene (auto туда НЕ входят — своя AutoLightManager.byPos). Устойчиво к reload (name персистится в LightStore JSON) + переиспользует номер после удаления. Правка чисто редакторная (UI-слой), core/аддон/тени не тронуты; аддон не затронут (auto-lights только в редакторе). Хвост: тираж на редактор port/1.21.x — по команде (отдельная сессия).
 
 Связь: [[project-gui-lag-gpu-bound-diagnosis]] (perf при многих авто-светах), [[addon-light-buffer-ssbo]] (MAX_LIGHTS), [[project-irlite-base-ported]].

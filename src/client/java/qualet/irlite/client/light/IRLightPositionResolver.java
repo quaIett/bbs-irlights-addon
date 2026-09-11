@@ -6,7 +6,6 @@ import net.minecraft.client.MinecraftClient;
 import org.joml.Matrix3fc;
 import org.joml.Matrix4f;
 import org.joml.Vector3d;
-import org.joml.Vector3f;
 
 /**
  * Resolves a form's absolute world position from the render-path matrix stack.
@@ -20,12 +19,19 @@ public final class IRLightPositionResolver
 
     public static Vector3d resolve(FormRenderingContext context)
     {
-        Matrix4f matrix = new Matrix4f((Matrix3fc) RenderSystem.getInverseViewRotationMatrix());
+        return resolve(context, new Matrix4f());
+    }
+
+    /** Also fills a caller-owned camera-relative world matrix so a spotlight can
+     *  transform its direction without rebuilding the same product. The matrix
+     *  must not be the context stack's own position matrix. */
+    public static Vector3d resolve(FormRenderingContext context, Matrix4f matrix)
+    {
+        matrix.set((Matrix3fc) RenderSystem.getInverseViewRotationMatrix());
         matrix.mul(context.stack.peek().getPositionMatrix());
-        Vector3f offset = matrix.getTranslation(new Vector3f());
 
         net.minecraft.util.math.Vec3d cam = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
 
-        return new Vector3d(cam.x + offset.x, cam.y + offset.y, cam.z + offset.z);
+        return new Vector3d(cam.x + matrix.m30(), cam.y + matrix.m31(), cam.z + matrix.m32());
     }
 }

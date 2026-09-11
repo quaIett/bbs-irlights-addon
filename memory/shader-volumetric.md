@@ -8,6 +8,7 @@ metadata:
   consolidated: 2026-06-18
   type: reference
   originSessionId: phase3-shader
+  modified: 2026-07-21T09:05:29.504Z
 ---
 
 The volumetric half of shaders/Lib/irlite_lights.glsl, ported from the original IRLights single-scatter BL engine. Parent: [[MEMORY]]. Library overview: [[shader-irlite-glsl]]. Hooked into Volumetric_FS — anchors/locals in [[shader-iterationrp-pipeline]]. VL fields come from the SSBO ([[addon-light-buffer-ssbo]]): vlParams.x = anisotropy (HG g), .y = vlDensity (extinction), .z = beamStrength; cone.x/y = spot cosines; posRadius = pos/range.
@@ -53,5 +54,7 @@ VL-NOISE ПОРТ В 6 ПАКОВ (2026-07-02, код done, рантайм-пр�
 irlite_phaseHG(cosTheta, g) = (1/4pi)*(1-g^2)/(denom*sqrt(denom)), denom=1+g^2-2g*cosTheta — Henyey-Greenstein anisotropy (g>0 forward scatter).
 
 VL OPTIONS (see [[shader-settings]]): IRLITE_VL_INTENSITY (master mult), IRLITE_VL_STEPS (march quality), IRLITE_VL_TIP_BOOST + IRLITE_VL_TIP_RADIUS (bulb glow), IRLITE_VL_MAX_DIST (cull distance), IRLITE_VL_SHADOWS (per-step beam/haze occlusion, default ON — see VL SHADOWS above). Per-light shape from vlParams (anisotropy/density/beam) is set by the addon, not the screen.
+
+VL BOB-JITTER FIX (2026-07-21, Complementary, addon e80f893; рантайм PASS): марш-луч ДОЛЖЕН стартовать от bobbing-глаза, не vec3(0). deferred2 реконструирует endpoint playerPos=ViewToPlayer(ScreenToView(..))=mat3(MVI)*view+gbufferModelViewInverse[3].xyz (bobbing-термин MVI[3] ровно раз → bob-STABLE). Истинный глаз в этом camera-relative player-space = ViewToPlayer(vec3(0))=gbufferModelViewInverse[3].xyz (≈0 без bobbing, колеблется с ним). Старый вызов irlite_volumetric(vec3(0.0), playerPos, normalize(playerPos), dither) держал origin БЕЗ MVI[3], endpoint — С → при bobbing отрезок марша съезжает vs bob-free ламп → ТОЛЬКО VL трясётся (surface/тени сравнивают один ViewToPlayer-fragWorld с лампами, MVI[3] консистентен; VL — единственный потребитель с origin И endpoint). ФИКС: eyePlayer=gbufferModelViewInverse[3].xyz; irlite_volumetric(eyePlayer, playerPos, normalize(playerPos-eyePlayer), dither). irlite_volumetric УЖЕ поддерживает ненулевой startWorld (maxDist=length(end-start), lightVec=posRadius-start, sample=start+pos — либа :1486/:1555/:1757). Лампы camera-relative к bob-free Camera.getPos() (irl-core LightRegistry.flush вычитает Camera.getPos → FramePipeline) — cameraPosition НЕ добавлять. Латентный с ed00e79, не регрессия; no-op без bobbing. БЕЗОПАСНЫ (origin уже=MVI[3]): Photon (c0_vl.fsh view_to_scene_space :243), IterationRP (Volumetric_FS :192), Bliss (composite2.fsh :442). БАГ vec3(0.0)-origin: CR+RV+BSL done (BSL 2026-07-21 в рамках полной синхры, **7118833**, рантайм PASS — [[bsl-pipeline]]); Solas open (тираж по команде). Альтернатива «снять MVI[3] с endpoint» = ХУЖЕ (частичный фикс, endpoint→кадр-0 vs лампы-в-MVI[3]-кадре → остаточный джиттер).
 
 Связь: shader-inject (инжектируемый GLSL + содержимое .irlights), авторинг в IRLite -> синк в redactor через copy-patches.ps1. Дополняет [[project-port-1211]] (там инжект упомянут лишь обзорно, без деталей волюметрики). Источник: память IRLite.

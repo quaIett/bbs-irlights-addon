@@ -87,6 +87,14 @@ final class VlSweep
     private VlSweep()
     {}
 
+    static void reset()
+    {
+        phase = Phase.WAIT_VL;
+        vlSeen = waitLogged = false;
+        warmupStart = runStart = currentFrame = lastSampleFrame = 0L;
+        for (List<Long> list : samples) list.clear();
+    }
+
     private static final class Config
     {
         final String label;

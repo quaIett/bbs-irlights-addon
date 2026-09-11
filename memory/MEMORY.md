@@ -1,131 +1,133 @@
 # Memory Index
 
+## Правило ведения индекса
+MEMORY.md <= 15 КБ (флор ~70 тем), одна строка/память, ноль декора ([[feedback-memory-strict-style]]). `_session-log.md` (журнал сессий), `_index-closed.md` (закрытые темы) — не грузятся. В шапке только «Последнее». Хуки — короткая фраза без коммит-хешей (они в топиках+git). Тема закрылась -> строку в `_index-closed.md`. Потолок превышен -> prune, не наращивать.
+
 ## Правило загрузки памяти
-- Эта инструкция предназначена исключительно для моделей ChatGPT. Если модель не является ChatGPT, она должна пропустить эту строку.
-- В начале каждой сессии по этому проекту читать внешний источник памяти: `C:\Users\Qualet\.claude\projects\C--Users-Qualet-Documents-Project-Minecraft-BBS-irlights\memory\MEMORY.md`.
+- (Инструкция исключительно для ChatGPT; Claude пропускает.) В начале сессии читать память проектов из указанных пользователем каталогов `.claude/projects`, обновлять её там же; общий склад и три точных пути: [reference-chatgpt-memory-location](reference-chatgpt-memory-location.md).
 
-СЕССИЯ 2026-07-18 (7, BLOCK-REBAKE GATE): триггер ребейка блок-теней огейчен, ЗАКОММИЧЕН (core 7ad518a / addon 598e497). Корень: сервер ресинкает оба interaction-блока ПОСЛЕ КАЖДОГО клика (даже пустой рукой) → same-state setBlockState → HEAD-миксин инвалидировал лампы до ванильного identity-отбоя. Фикс: (1) миксин аддона — old==state гейт (identity, стейты интернированы) + height-гейт; (2) core BlockShadowCache.invalidateChange + BlockShadowCollector.sameSilhouette — section-проверка ДО классификации, скип silhouette-neutral свопов (грасс→дёрн, печка lit, fluid-тики=INVISIBLE, листва distance=тот же baked model instance); зеркалит collectForLight, сомнение/throw=инвалидация. Гейт редактора DONE+ЗАКОММИЧЕН 2026-07-19 (сессия 8, прицеп Ф0): irlights main dafbf39, редактор собран на core 1.2. ОТКРЫТО: тираж на порт-ветки — по команде.
-СЕССИЯ 2026-07-18 (5, HALF-RES EVSM): пилот на CR DONE+ЗАКОММИЧЕН (core 01160ad / addon 6457312+c913299): ultra bake 34-42→17.8 ms, FPS 17-26→29-35, EVSM ×2.7 (atlas/4 через SpotlightDepthAtlas.evsmShift, ratio-aware гейт ТОЛЬКО в CR — остальные 6 паков на ultra гаснут в PCF до тиража); сплит pyr/evsm дал атрибуцию (25.3/4.3 из старых 29.6); +VRAM-телеметрия "[irlite] vram:" (NVX evictions); аномалия «линейная деградация → F11 сброс» запаркована. NEXT = partial-tile filter (Java-only). Детали: [plan-shadow-bake-track](plan-shadow-bake-track.md).
-СЕССИЯ 2026-07-18 (4, BAKE Ф0): профайлер-разбивка бейка РЕАЛИЗОВАНА+e2e PASS+ЗАКОММИЧЕНА (core 4e4e490 / addon 06d7de9; editor кодом не менялся, пересобран) (core: ShadowBakeProbe/ShadowEngine/ShadowBaker+4 фильтра; addon: VlProfiler switchPass+counters, PASS_BAKE→"bake-head"); ревью 13 агентов = 1 фикс (off-by-one первого окна). Сегменты bake-spot/-spot-filter/-point/-point-filter/-tail + счётчики per-tier в "[irlite] bake:". ГЕЙТ ПРОЙДЕН: ultra-сцена 25 спотов → bake 34-42 ms (кап FPS), **spot-filter = 86%** (25 overlay-тайлов ре-фильтруются целиком каждый кадр), point=0 → Ф2 point-гранулярность НЕ рычаг этой сцены; кандидаты: partial-tile filter / half-res EVSM на ultra / cadence. C10-спайк 318 ms виден на загрузке. Детали+вердикт: [plan-shadow-bake-track](plan-shadow-bake-track.md).
-СЕССИЯ 2026-07-18 (3, VL 3c BILATERAL): ЗАВЕРШЕНА+ЗАКОММИЧЕНА (core db0d3e2 / addon f8d2fb7 / editor 5dd3207). Bilateral upsample VL на CR (bit6 деф.ON, истинная view-Z метрика, fetch-bias +0.25, килл-свитч -Dirlite.vlNoBilateral); протокол юзера PASS: deferred2 3.40→0.97 ms (×3.5) на 0.5, bilateral +0.09 ms, края чистые; half=дефолт. ГОТЧА: prism-форк CR_IRLights+DOF = СТАРОЕ поколение IRLite, при тираже re-patch, НЕ слепой синк. NEXT SESSION = bake-трек (C10 + пропуск граней без кастеров). Детали: [plan-vl-3c-bilateral](plan-vl-3c-bilateral.md).
-СЕССИЯ 2026-07-18 (2, ПРОФАЙЛЕР): задача A (чистка UI) ЗАКОММИЧЕНА addon ee0b145 / editor 16cfd21; VL-профайлер (GL-таймеры пассов + дифф-свип, -Dirlite.profileVl=true) РЕАЛИЗОВАН, ревью 9 фиксов, e2e-автотест PASS (quickplay-инфра в build.gradle) — НЕ ЗАКОММИЧЕН, ждёт подтверждения; загадка Hi-Z открыта до прогона юзера в тяжёлой сцене. Статус/готчи: [plan-vl-profiler](plan-vl-profiler.md).
-СЕССИЯ 2026-07-17→18 (VL-РЕФАКТОР, главный трек): мега-исследование (36 агентов) → пилот на CR ЗАВЕРШЁН до 3b, ВСЁ ЗАКОММИЧЕНО (Fable-агенты разрешены). Итог: zero-recompile хребет (UBO b7, слайдеры BBS+ImGui), blue-noise, cluster-cull (+10 FPS), time-morph (деф.OFF), Hi-Z (страховка). Статусы/коммиты/готчи (loom-purge!): [plan-vl-refactor-research](plan-vl-refactor-research.md); далее: [plan-vl-3c-bilateral](plan-vl-3c-bilateral.md).
-СЕССИЯ 2026-07-17 (2): баг «прыгающих теней» починен + ретест PASS; закоммичен вместе с atlas-merge (core eb3b229 / addon 38bf5e7+e11886e). Детали: [fix-shadow-slot-rank-stability](fix-shadow-slot-rank-stability.md).
-СЕССИЯ 2026-07-16: atlas-merge point-теней РЕАЛИЗОВАН ЦЕЛИКОМ, I5 закрыт 07-17, закоммичен той же связкой. Статус: [plan-point-shadow-atlas-merge](plan-point-shadow-atlas-merge.md).
-СЕССИЯ 2026-07-13 (2): octahedral/dual-paraboloid point-тени ЗАКРЫТЫ КАК НЕРЕАЛИЗУЕМЫЕ — НЕ ПЕРЕОТКРЫВАТЬ (бейк = ванильные per-RenderLayer шейдеры, только матричный трансформ → нелинейный warp невозможен; DPSM требует тесселяции). Атлас как хранение — реализован 07-16. Открыто: пропуск бейка граней без кастеров (sphereTouchesFace уже считает). Топик-файл удалён — эта строка = канон.
-СЕССИЯ 2026-07-13: LOD-тиры I1-I4 + caster fix закоммичены (2e57f8d/700b60c/08df3f6); I5 закрыт 07-17; тираж на другие шейдеры — по команде. Детали: [plan-shadow-lod-tiers](plan-shadow-lod-tiers.md).
-СЕССИЯ 2026-07-12: Phase 3 кластеризация DONE + PASS 67→112 FPS (binding 6). Детали: [plan-perf-fix-cluster-phase3](plan-perf-fix-cluster-phase3.md).
-СЕССИЯ 2026-07-10 (3): Phase 2 core DONE (C1/C2/C3). Детали: [plan-perf-fix-core-phase2](plan-perf-fix-core-phase2.md).
-СЕССИЯ 2026-07-10: перф-аудит (P0 = per-fragment цикл) → [project-perf-audit-irlite-2026-07-10](project-perf-audit-irlite-2026-07-10.md); Phase 1 лечения done, ЧЕКПОИНТ master a43d46b → [plan-perf-fix-cr-phase1](plan-perf-fix-cr-phase1.md).
-СЕССИЯ 2026-07-08 (2): унификация трилогии ЗАКРЫТА (per-version ядро, версия 1.1, 13/13, запушено) → [project-trilogy-unify-11](project-trilogy-unify-11.md).
-СЕССИЯ 2026-07-08: линия 1.21.11 ЗАКРЫТА (core 3527d63) → [project-port-12111-refresh](project-port-12111-refresh.md). Готча mavenLocal per-MC — в routing-файле.
-Фаза 2026-07-02 (директива юзера): чиним ТОЛЬКО main/master; порт на ветки/редактор — в конце, строго по команде.
-2026-07-03: point-стек сведён (MSM4+cube-view), Photon 30040cf PASS. HANDOFF: [project-point-shadow-fix-backlog](project-point-shadow-fix-backlog.md).
-СЕССИЯ 2026-07-04: тираж фильтрации 6/6 (CR 69ecbda, RV f3b3f37, BSL 697373c, Solas 19e6b4e, Bliss 283256b). IterationRP ЛОКАЛЬНО/gitignored — коммит НЕ пере-предлагать.
-СЕССИЯ 2026-07-06/07: линия 1.21.4 ЗАКРЫТА (1ce93fc/a88d05a) → [project-port-1214](project-port-1214.md).
-СЕССИЯ 2026-07-06: порт 1.21.1 ЗАКРЫТ+ЗАКОММИЧЕН (80a3986/688afda/f85113e) → [plan-port-1211-workflow](plan-port-1211-workflow.md).
-СЕССИЯ 2026-07-05: Tier1+2 выносы в core закоммичены (cf4ad94 v1.1 / 3c3ef3f / fa71093) → [plan-irl-core-library-extraction](plan-irl-core-library-extraction.md); editor e147571.
+Объединённая база: 2 мода — IRLite (BBS-аддон), IRL-redactor (ImGui-редактор) — + ядро irl-core. Старт «поменяй X» -> [reference-edit-routing-by-area](reference-edit-routing-by-area.md). Не грузятся: `_archive/`, `_session-log.md`, `_index-closed.md`. Инфра (3 memory-дира = 1 склад через junctions): [reference-memory-junctions](reference-memory-junctions.md). Фаза 2026-07-02: чиним ТОЛЬКО main/master; порт на ветки/редактор — строго по команде.
 
-Объединённая база: 2 мода — IRLite (BBS-аддон), IRL-redactor (ImGui-редактор) — + ядро irl-core. Старт «поменяй X» -> [reference-edit-routing-by-area](reference-edit-routing-by-area.md).
-Done-логи в `_archive/` — не индексируется. Инфра: 3 memory-дира = ОДИН склад через junctions -> [reference-memory-junctions](reference-memory-junctions.md).
+## Журнал сессий
+Полный хронолог — в `_session-log.md` (не грузится, читать вручную). Последнее (09-11 #3): VL-СКОУП — наложен обновлённый пакет (4 репо): микро-оптимизации irlite_lights.glsl (gobo/point-hoist, zero-knobs; OCCLUDED_SKIP отклонён), GPU-harness ~8-15% дешевле point/spot. МЕНЯЛИСЬ shader+патч+пак(64fe36)+редактор+DOF; core нет. Собран irlite-1.1.6; ИГРОВОЙ A/B (deferred2, intensity>0) ОТКРЫТ = текущий тест [[project-vl-followup-2026-09-11]]. Пред. (09-11 #2): ПРОДОЛЖЕНИЕ ОПТИМИЗАЦИЙ — наложен пакет `Desktop\IRLights-changes-1.1.6-2026-09-11` поверх 1а (addon→1.1.6): compact cluster-upload −95%, host-cell фикс BlockShadowCache, VBO-классификация ShadowRenderer, scratch LightCollector + P2; собран irlite-1.1.6+mc1.20.4.jar (бандл честный), CPU-harness PASS. ИГРОВОЙ A/B/FPS+визуал НЕ проверены = текущий скоуп [[project-perf-followup-2026-09-11]]. Пред. (09-11 #1): ПЕРФ-РЕДИЗАЙН ЭТАП 1а сделан на ДРУГОЙ машине (ZoGa), НЕзакоммичен — снимок правды `C:\Users\qualet\Desktop\IRLights`. Reuse целого неизменившегося shadow-overlay: core 1.1.5→1.1.6, CasterRevision/ShadowOverlayCache/ShadowCasterSource.revision, ShadowBaker пропускает copy/draw/pyramid/moments; BBS-адаптер 2.3.1 (cubic + villager MobForm CPU-eval). 59 проверок + CSV-регрессия PASS; in-game 600 кадров sp.reuse=26/кадр. A/B ДОКАЗАН ин-гейм 09-11 (villager-сцена): GPU bake 7.889→0.006 мс, CPU frame 16.41→9.09 мс (−44.6%, ≈61→110 FPS); этапы 1б–4 открыты. ПЕРЕНЕСЕНО на этот ПК 09-11 (побайтовая копия из снимка, core 1.1.6 в mavenLocal, аддон собран на JDK 21 → irlite-1.1.5+mc1.20.4 с вложенным core 1.1.6); локально НЕзакоммичено, GitHub не трогали [[project-performance-redesign-stage1a]]. Пред. (09-10): РЕСИНК рабочей копии с источника правды `Desktop\IRLIghts_new` (08-30): 5 репо --ff-only (addon +97), склад 109→153, core 1.1.5 в mavenLocal [[project-workstation-resync-2026-09-10]]. Пред. (08-11): ЭКСПЕРИМЕНТ contact-размытие теней (dev photon_v1.3b_IRLights ONLY, патчеры не тронуты): новый оценщик полутени mode-тогблом IRLITE_SHADOW_PENUMBRA_MODE (1=contact default: backprojection-валидность + вес 1/p² + центр-тап + стратификация + raw-фолбэк внешней кромки, point на zPersp; 0=classic для A/B) + слайдер IRLITE_CONTACT_BLOCKER_TAPS; ревью-wf 8 confirmed закрыты + verify-wf 3/3 (mode 0 = classic parity); ИН-ГЕЙМ PENDING; вахта: крутые склоны у лампы (обрыв каёмки), зерно спот-бленд-зоны [[project-contact-penumbra-experiment]]. Пред. (08-10a/b/c — 16px-откат, тень большой формы, флешлайт 5 jar; 07-25) — в _session-log.
 
-АКТИВНО СЕЙЧАС: [project-vram-collapse-investigation](project-vram-collapse-investigation.md) — VRAM-коллапс редактора: java детерминированно ест ~9.6 GB через ~20 с после джойна (двумя ступенями) → free 0.5 GB → PCIe-пейджинг → 15 FPS при невинных GL-таймерах; юзер подозревает тени; инструментарий ГОТОВ+ЗАКОММИЧЕН (профайлер редактора irlights 4d5b93c: runtime-тумблер+hold-bake+ImGui «perf»; alloc-телеметрия core db731ac; GPU-семплер per-process). NEXT = репро с alloc-строками → поимённая атрибуция. Вероятно тот же корень, что запаркованная «деградация → F11 сброс».
-
-ЗАКРЫТО РАНЕЕ СЕГОДНЯ: [plan-partial-tile-filter](plan-partial-tile-filter.md) — ТРЕК ЗАКРЫТ 2026-07-19 сессия 8: Ф1 перемер ultra PASS (bake 13.4-13.7, rect 100%, вертикальную формулу не трогали), Ф2 cull-слак модель-блоков реализован + визуал-гейт юзера PASS (тень у края конуса не мигает, +0.3-0.4 ms), Ф3 апроны/lod ЗАКРЫТЫ ИЗМЕРЕНИЕМ (оверхед ~1.3% при пороге 15%, пирамида ровно 4/3 — НЕ РЫЧАГ, не переоткрывать; ~13.5-14 ms = потолок фичи). ВНИМАНИЕ: core теперь версия 1.2 в mavenLocal. ЗАКОММИЧЕНО: core 9c8e8fe / addon 633422c. Хвосты: Ф0-прицеп (гейт редактора, по команде), тираж на порт-ветки.
+## Открытые хвосты
+- DOF-аудит 08-10: всё актуально (master=origin=e27a808, комбо 7/7 = регенерация из main, гейт зелёный); `build-bbs-pack.ps1` переведён на `-Pmc=universal` для DOF (был default 1.20.4 с точным пином → пак 1.20.x не встал бы на 1.20.1), тег v1.0.0 подтянут локально. Открыто: jar в инстансе BBS = предрелизный `dev-1` (пользователь решил не трогать) [[project-dof-combo-sync]].
+- ✅ DOF ЗАКРЫТ + ОТРЕЛИЖЕН (07-26): ин-гейм PASS, universal-jar доказан побайтово, 4 цели -Pmc, PRIVATE репо quaIett/bbs-dof-addon, релиз v1.0.0 с 4 jar — первый релиз в экосистеме [[project-dof-1211-port]].
+- ✅ ТИРАЖ РЕДАКТОРА ЗАКРЫТ (S1+S2+S3) [[plan-editor-tiraz-sessions]]; разблокирован Заход 2 редизайна [[project-editor-redesign]] + DoF (Phase B шаг 3, отд. сессия, remote не заведён).
+- UBO-миграция: переснять профайлер волны 1 (замер загрязнён); волны 2/3 (surface INTENSITY/SPECULAR/TOON; SHADOW_*) не начаты.
+- cherry-pick 3a1ad5e (иконка light-формы) в master.
+- LOD-тиры: I5 визуально НЕ закрыт (ретест 64-spot после caster fix); тираж на 6 паков не делался.
+- Тираж на порт-ветки (block-rebake гейт, partial-tile, W2): все порт-ветки обоих репо ещё на core 1.1.
+- Состояние (07-23): core main=6cebbc5 (cookie-mirror, НЕ запушен); addon master=1a23b6b + port/1.21.1=5e73427 (cookie render-path фикс, НЕ запушено); CR-синхра трилогия 7/7 влита ранее.
 
 ## Маршрутизация и стратегия (читать первой)
-- [reference-edit-routing-by-area](reference-edit-routing-by-area.md) — что-где менять (патчер+свет+тени=irl-core; caster/UI per-mod; .irlights owner IRLite); команды сборки.
-- [project-github-repos](project-github-repos.md) — 3 приватных репо под owner quaIett (заглавная I); origin+ветки, gh CLI.
+- [project-java-optimization-2026-09-11-iter1](project-java-optimization-2026-09-11-iter1.md) — Последнее09-11: Java-итерация1,6/7кандидатов реализованы,1.1.6; сборки/harness/review PASS, отдельный JAR6B154C1B+перенос; игровой A/B OPEN, runtime VL не заменён.
+- [plan-per-light-profiles-and-colored-shadows](plan-per-light-profiles-and-colored-shadows.md) — МАКС. ПРИОРИТЕТ (юзер 09-10, вернуться позже): перф-прикидка цветных теней/витража и per-light профилей VL+аутлайна; цены, развилка ABI SSBO, порядок внедрения. Код НЕ начат.
+- [project-performance-redesign-stage1a](project-performance-redesign-stage1a.md) — АКТИВНЫЙ перф-редизайн: этап 1а (reuse неизменившегося shadow-overlay, core→1.1.6) перенесён на этот ПК + A/B ДОКАЗАН (bake 7.9→0 мс).
+- [project-perf-followup-2026-09-11](project-perf-followup-2026-09-11.md) — АКТИВНЫЙ продолжение оптимизаций поверх 1а (пакет `Desktop\IRLights-changes-1.1.6-2026-09-11`, наложен на этот ПК 09-11, addon→1.1.6): compact cluster-upload −95%, host-cell фикс BlockShadowCache, VBO-классификация ShadowRenderer, scratch LightCollector + P2. CPU-harness PASS; ин-гейм визуал ПРОВЕРЕН 09-11 (регрессий нет, лог чистый). OPEN: количественный FPS-A/B vs 1.1.5-билда.
+- [project-vl-followup-2026-09-11](project-vl-followup-2026-09-11.md) — АКТИВНЫЙ VL-скоуп (наложен 09-11, пилот Complementary r5.8.1): микро-оптимизации irlite_lights.glsl (gobo/point-hoist, zero-knobs gates), OCCLUDED_SKIP отклонён; GPU-harness ~8-15% дешевле point/spot (float parity 5.96e-8). МЕНЯЛИСЬ shader+патч (49b8b7)+пак(64fe36)+редактор+DOF-комбо; core не менялся. Собран irlite-1.1.6 (4B4101). ИГРОВОЙ A/B (deferred2) ОТКРЫТ.
+- [plan-post-trilogy-port-rollout](plan-post-trilogy-port-rollout.md) — АКТИВНЫЙ план тиража: фаза A мёрж core+addon → фаза B аддоны→редактор→DoF; топология веток, блокеры.
+- [plan-editor-tiraz-sessions](plan-editor-tiraz-sessions.md) — АКТИВНЫЙ (Фаза B шаг 2): тираж РЕДАКТОРА main→4 порт-ветки, 3 сессии; core-staleness матрица, канон запушен 07-23.
+- [reference-core-versioning](reference-core-versioning.md) — версии irl-core (1.1.3); ось либы != ось продукта; бамп = 5 мест; готча nested-jar.
+- [reference-edit-routing-by-area](reference-edit-routing-by-area.md) — что-где менять (патчер+свет+тени=core; caster/UI per-mod); команды сборки.
+- [project-workstation-resync-2026-09-10](project-workstation-resync-2026-09-10.md) — ИНФРА: источник правды = `C:\Users\qualet\Desktop\IRLIghts_new` (снимок 08-30); что подтянуто локально 09-10, где бэкап-рефы, новые пути JDK, origin отстаёт (core +3 / addon +6 / editor +2).
+- [project-github-repos](project-github-repos.md) — 4 репо под owner quaIett (заглавная I): трилогия public + bbs-dof-addon private; origin/ветки, gh CLI; запрет на патч IterationRP СНЯТ (07-26).
+- [project-vfxlights-copy-analysis](project-vfxlights-copy-analysis.md) — анализ VFX-LIGHTS (Xavin): архитектура+якоря взяты из IRLite, 3 прямых цитаты в их файлах; вердикт внутри.
+- [project-dof-combo-sync](project-dof-combo-sync.md) — комбо IRL+DOF = тело main-патча + DOF-хвост; регенерация tools/gen-combo.ps1, гейт verify-combos.ps1; готчи Solas V3.7.
+- [project-dof-1211-port](project-dof-1211-port.md) — DOF на 1.21.1+BBS 2.4 матрицей -Pmc на master (порт-веток НЕТ); готчи Iris-депа и пина манифеста.
+- [project-flashlight-addon](project-flashlight-addon.md) — 4-й мод: аддон-фонарик (item→спот из глаз по взгляду) на irl-core; MC 1.20.1–1.21.1 + 1.21.11 (per-era src/ + universal-jar, 08-10); свой mixin renderWorld HEAD priority 900 → тот же bake+flush редактора.
 - [project-irl-sync-strategy](project-irl-sync-strategy.md) — карта дрейфа аддон<->редактор; универс-jar отменён -> per-MC.
-- [plan-irl-core-library-extraction](plan-irl-core-library-extraction.md) — Tier1+2 выносы РЕАЛИЗОВАНЫ+ЗАКОММИЧЕНЫ 2026-07-05; core-API список внутри; Tier3 не делалось.
-- [plan-port-1211-workflow](plan-port-1211-workflow.md) — порт 1.21.1 done 2026-07-06; статус-блок внутри.
-- [tool-build-trilogy-script](tool-build-trilogy-script.md) — build-trilogy.ps1: трилогия на все MC -> Desktop\IRLights; per-MC core = publishToMavenLocal.
-- [tool-build-bbs-pack-script](tool-build-bbs-pack-script.md) — build-bbs-pack.ps1: core+4 аддона 1.20.x -> Desktop\bbs_pack.
+- [plan-irl-core-library-extraction](plan-irl-core-library-extraction.md) — Tier1+2 выносы DONE; core-API список; Tier3 не делалось.
+- [tool-build-trilogy-script](tool-build-trilogy-script.md) — build-trilogy.ps1: трилогия на все MC; per-MC core = publishToMavenLocal.
+- [tool-build-bbs-pack-script](tool-build-bbs-pack-script.md) — build-bbs-pack.ps1: core+4 аддона 1.20.x.
 
 ## IRL-redactor
 
 ### Тени (оркестрация физически в irl-core)
-- [plan-irl-core-shadow-extraction](plan-irl-core-shadow-extraction.md) — КАНОН теней: оркестрация в irl-core + шов ShadowCasterSource + 5 инвариантов; Ф4 тираж на порт-ветки открыт.
+- [plan-irl-core-shadow-extraction](plan-irl-core-shadow-extraction.md) — КАНОН теней: оркестрация в core + шов ShadowCasterSource + 5 инвариантов; Ф4 тираж open.
 - [project-shadow-bake-perf-audit](project-shadow-bake-perf-audit.md) — живой док перфа бейка; Tier-1/2 done; открыт C10.
-- [plan-shadow-bake-track](plan-shadow-bake-track.md) — ПЛАН новой сессии: Ф0 профайлер-разбивка бейка (steady 3.4-4ms = overlay-цепочка Pyramid/EVSM z=6, спайки 320ms = C10) → C10 → per-face фильтры → BBS-probe статики; рекон-якоря и вердикты «не переоткрывать» внутри.
-- [addon-shadows](addon-shadows.md) — референс бейк-движка (ShadowBaker/Renderer, пресеты, кэш, cull); open anim-token freeze; caster cap = nearest-128.
-- [fix-shadow-depthstate-repin](fix-shadow-depthstate-repin.md) — ре-пин depth/blend/матриц перед emit + feet-pivot AABB->сфера.
-- [fix-shadow-slot-rank-stability](fix-shadow-slot-rank-stability.md) — фикс «прыгающих» теней при спросе>пула: rank-стабильность + spare-режим; ЗАКОММИЧЕН, ретест PASS 2026-07-17.
+- [plan-shadow-bake-track](plan-shadow-bake-track.md) — ПЛАН бейка: профайлер → C10 → per-face фильтры → BBS-probe; вердикты «не переоткрывать».
+- [addon-shadows](addon-shadows.md) — референс бейк-движка (ShadowBaker/Renderer, пресеты, кэш); caster cap = nearest-128.
 - [shadow-distance-quality-plan](shadow-distance-quality-plan.md) — качество на дали (Ф1-2 done, Ф3 open).
-- [project-point-shadow-square-root-cause](project-point-shadow-square-root-cause.md) — корень «зернистого квадрата» = point 512 vs 1024 (D1); закрыт tier0=1024.
-- [plan-shadow-lod-tiers](plan-shadow-lod-tiers.md) — LOD-тиры I1-I4 + caster fix закоммичены 2026-07-13; тираж отдельно по команде.
-- [plan-point-shadow-atlas-merge](plan-point-shadow-atlas-merge.md) — PointDepthAtlas 30 ламп; РЕАЛИЗОВАН+ЗАКОММИЧЕН 2026-07-16/17; имплем-план внутри = референс тиража.
-- [plan-cluster-heatmap-debug](plan-cluster-heatmap-debug.md) — IDEA: дебаг-heatmap ClusterGridBuffer; prompt внутри.
+- [plan-shadow-lod-tiers](plan-shadow-lod-tiers.md) — LOD-тиры I1-I4 + caster fix закоммичены; тираж по команде.
+- [plan-point-shadow-atlas-merge](plan-point-shadow-atlas-merge.md) — PointDepthAtlas 30 ламп; DONE; имплем-план = референс тиража.
 - [plan-shadow-filtering-refactor](plan-shadow-filtering-refactor.md) — point-фильтрация ЗАВЕРШЕНА (MSM4+cube-view); open: overlay-перф, спот на MSM.
-- [project-point-shadow-fix-backlog](project-point-shadow-fix-backlog.md) — бэклог А-Д (А done, Б-Д нет) + HANDOFF 2026-07-03 + НЕ ТРОГАТЬ.
+- [project-point-shadow-fix-backlog](project-point-shadow-fix-backlog.md) — бэклог А-Д (А done, Б-Д нет) + НЕ ТРОГАТЬ.
 
 ### Порты / редактор / движок / интеграции
-- [project-port-1211](project-port-1211.md) — порт 1.20.4->1.21.11 (продакшн) + дельты 1.21.1/1.21.4 + карта API; 1.21.11 тени через capture-queue.
-- [project-port-12111-refresh](project-port-12111-refresh.md) — линия 1.21.11 актуализирована и ЗАКРЫТА 2026-07-08.
-- [project-trilogy-unify-11](project-trilogy-unify-11.md) — унификация 2026-07-08: per-version ядро, версия 1.1, пуш; коммиты внутри.
-- [project-port-1214](project-port-1214.md) — линия 1.21.4 ЗАКРЫТА; configure 3-арг жив; yaw-drop/PositionColor per-mod.
-- [project-port-1201](project-port-1201.md) — порт 1.20.1: только деп-матрица + LWJGL-пин, ноль правок .java.
-- [project-irlite-base-ported](project-irlite-base-ported.md) — КАНОН движка+редактора: BBS-free свет (LightScene/PlacedLight/LightDriver) — feature-complete.
+- [project-irlite-base-ported](project-irlite-base-ported.md) — КАНОН движка+редактора: BBS-free свет (LightScene/PlacedLight/LightDriver).
 - [project-editor-vs-replay-screen-conflict](project-editor-vs-replay-screen-conflict.md) — редактор в Replay Mod (PASS); Фаза 3 курсор open.
-- [project-flashback-irlights-plan](project-flashback-irlights-plan.md) — PLAN-only: аддон под Flashback replay; kill-switch = SSBO b7 под export.
+- [project-editor-guide-overlay](project-editor-guide-overlay.md) — гайды света + драг спота как ImGui-оверлей; a7859ed PASS; хвост: закрытый редактор + point radius.
+- [project-editor-free-camera](project-editor-free-camera.md) — свободная камера в редакторе; default-on, F toggle, hold-ЛКМ обзор; 9120755 PASS; порт-ветки open.
+- [project-editor-slider-value-input](project-editor-slider-value-input.md) — средний клик по слайдеру = инлайн точный ввод; 3b69a0d PASS; порт-ветки open.
+- [project-flashback-irlights-plan](project-flashback-irlights-plan.md) — PLAN-only: аддон под Flashback; kill-switch = SSBO b7.
 - [project-imgui-axiom-collision](project-imgui-axiom-collision.md) — краш ImGui рядом с Axiom; try/catch+fallback.
-- [project-auto-block-lights](project-auto-block-lights.md) — авто-свет от эмиссивных блоков; OFF по умолчанию; MAX_LIGHTS->2048.
-- [project-gui-lag-gpu-bound-diagnosis](project-gui-lag-gpu-bound-diagnosis.md) — лаг GUI = GPU-bound; рычаг = кластеризация (done); его FrameProfiler ОТКАЧЕН (профайлер VL написан заново).
+- [project-auto-block-lights](project-auto-block-lights.md) — авто-свет от эмиссивных блоков, OFF; MAX_LIGHTS=2048; + фикс нумерации источников (b8068b1).
 - [project-spotlight-gobo-cookie-plan](project-spotlight-gobo-cookie-plan.md) — gobo/cookie done; LRU done; per-pack recheck open.
 
 ### Forge / Sinytra Connector
 - [project-forge-connector-compat](project-forge-connector-compat.md) — аддон на Forge 1.20.1 через Connector beta.48 (fmj fabricloader >=0.15.0).
 
 ### Референсы / правила работы
+- [reference-debug-ui-flags](reference-debug-ui-flags.md) — весь дебаг OFF; возврат -Dirlite.debug / -Dirlredactor.debug; holdBakeOnJoin true->false.
 - [reference-bbs-fs-not-refreshed](reference-bbs-fs-not-refreshed.md) — референс BBS-кода = bbs-fs, не форк refreshed.
+- [reference-macos-out-of-scope](reference-macos-out-of-scope.md) — macOS НЕ поддерживаем; MC_OS_MAC-гарды игнорировать.
 - [feedback-no-per-session-branch](feedback-no-per-session-branch.md) — НЕ создавать ветку под сессию.
 - [feedback-memory-strict-style](feedback-memory-strict-style.md) — память в строгом LLM-стиле, ноль декора.
 - [feedback-visual-test-image-prompts](feedback-visual-test-image-prompts.md) — визуальные проверки = image-gen промпт (EN, EXPECTED/REGRESSION).
 - [reference-imgui-font-glyph-range](reference-imgui-font-glyph-range.md) — шрифт = Latin-1+кириллица; спецсимволы = тофу.
 - [iris-source-library](iris-source-library.md) — исходники Iris: PRIMARY 1.20.1 + fallback 1.7.2-1.20.4.
-- [ref-betterlights-shadow-comparison](ref-betterlights-shadow-comparison.md) — BetterLights vs IRLite.
 
 ## IRLite — ядро BBS-аддона
+- [reference-shadow-cap-vs-resolution](reference-shadow-cap-vs-resolution.md) — разрешение теней менять дёшево (textureSize), кап — нет (frozen GLSL ABI, потолок 64 из long-масок); пресет 16px пробовали и откатили.
+- [project-shadow-clip-scaled-forms](project-shadow-clip-scaled-forms.md) — тень большой формы: ОБА виновника закрыты (тогбл shadow_partial_tile + честная сфера foldFormChain с мостом BBS 2.3/2.4); ИН-ГЕЙМ PASS; закоммичено (не запушено); открыт geometry-AABB для authored-large bbmodel.
+- [project-contact-penumbra-experiment](project-contact-penumbra-experiment.md) — эксперимент contact-оценщика полутени (dev Photon only, mode-тогбл 0/1, classic сохранён); ин-гейм PENDING, тираж по команде.
+- [project-entity-reveal-prototype](project-entity-reveal-prototype.md) — reveal-in-light прототип (CR 1.20.4): сущность видна только в конусе спота, дизер-край + 2 слайдера; ветка feature/entity-reveal-spotlight-cr, НЕ закоммичено.
 - [addon-architecture](addon-architecture.md) — всё через миксины; per-frame collect->bake->flush(SSBO7) до Iris.
 - [addon-forms](addon-forms.md) — PointLightForm/SpotlightForm на BBS Form; маски->lightMask.
+- [project-light-form-item-icon](project-light-form-item-icon.md) — иконка light-формы в инвентаре: DONE 3a1ad5e; хвост cherry-pick в master.
 - [addon-light-collection](addon-light-collection.md) — SCANNER vs RENDER, дедуп; MAX_LIGHTS=2048.
-- [fix-bone-attached-light-deadzone](fix-bone-attached-light-deadzone.md) — bone-свет: render-path забирает всегда.
+- [fix-modelblock-light-animation-states](fix-modelblock-light-animation-states.md) — ModelBlock-свет не ехал за animation states; фикс walk() (PASS).
+- [fix-render-path-light-world-pos-1211](fix-render-path-light-world-pos-1211.md) — render-path свет на 1.21 гулял; фикс = context.world (port/1.21.1, PASS). Готча: mavenLocal core 1.1.4 per-MC (1.20 class_4587 vs 1.21 Matrix4fStack).
+- [fix-cookie-render-path-spotlights](fix-cookie-render-path-spotlights.md) — gobo не работал на render-path спотах (BodyPart-кость/актёры/реплеи): render-path звал no-cookie registerSpot; фикс SpotlightFormRenderer (master 1.20.4 PASS + port/1.21.1); ручная сборка аддона рецепт.
 - [addon-ui-config](addon-ui-config.md) — IrliteConfig, BBSSettings-категории, L10nMixin, гайды.
-- [plan-interactive-spot-guides](plan-interactive-spot-guides.md) — интерактивные гайды спота; PASS+коммит 2026-07-02.
 - [project-refactor-origin](project-refactor-origin.md) — IRLite = рефактор IRLEngine (uniform->SSBO7 + патчер).
 - [commit-checkpoints](commit-checkpoints.md) — (feedback) коммиты только в чекпоинты по подтверждению; gitignore shaders/ -> git add -f.
-- [feedback-addon-runclient-command](feedback-addon-runclient-command.md) — (feedback) рантайм ВСЕГДА runClient -Pmc=1.20.4, Git Bash, лог run/runclient-console.log в фоне.
+- [feedback-addon-runclient-command](feedback-addon-runclient-command.md) — (feedback) рантайм = runClient -Pmc=1.20.4, Git Bash, лог в фоне.
+- [fix-bbs24-uitrackpad-limit](fix-bbs24-uitrackpad-limit.md) — BBS 2.4-1.20.1 сдвинул limit() в generic UINumericInput -> NoSuchMethodError; рефлексивный limit + ASM-чекер дрейфа.
 
 ## irl-core — общее ядро
 - [patcher](patcher.md) — DSL .irlights (@target/@packversion/@marker, after/before/replace); validate-first. CONTRACT_VERSION=1.
-- [addon-light-buffer-ssbo](addon-light-buffer-ssbo.md) — std430 LightBuffer: binding7, header 16B + 6×vec4/96б; MAX_LIGHTS=2048; GLSL зеркалит байт-в-байт. Рядом UBO IrliteVlGlobals — контракт в plan-vl-3c-bilateral.
-- [plan-perf-fix-cluster-phase3](plan-perf-fix-cluster-phase3.md) — Phase 3 кластеризация DONE 2026-07-12 (binding 6, 67->112 FPS); статус-блоки внизу; тираж отложен.
+- [addon-light-buffer-ssbo](addon-light-buffer-ssbo.md) — std430 LightBuffer: binding7, header 16B + 6×vec4/96б; MAX_LIGHTS=2048; байт-в-байт. UBO IrliteVlGlobals.
 
 ## Шейдер-инжект — общие контракты
 - [plan-lens-flare](plan-lens-flare.md) — PLAN-only lens flare; open: SSBO-слот.
 - [shader-irlite-glsl](shader-irlite-glsl.md) — контракт irlite_lights.glsl: struct 6×vec4, #define-опции, per-light математика.
 - [shader-shadow-sampling](shader-shadow-sampling.md) — GLSL-чтение теней; гард: vlParams.w<0 ДО int().
 - [shader-volumetric](shader-volumetric.md) — волюметрика Beer-Lambert/HG; VL-noise done на CR, порт в 5 паков open.
-- [plan-vl-refactor-research](plan-vl-refactor-research.md) — VL-рефактор: реализация до 3b ЗАКОММИЧЕНА 2026-07-18; тираж на 6 паков open; статусы/готчи/рекон 3c внутри.
-- [plan-vl-profiler](plan-vl-profiler.md) — профайлер РЕАЛИЗОВАН+ЗАКОММИЧЕН 2026-07-18 (-Dirlite.profileVl=true); замеры+готчи внутри; Hi-Z закрыт (ALU-bound); чистка UI done.
-- [plan-vl-3c-bilateral](plan-vl-3c-bilateral.md) — ПЛАН новой сессии: bilateral + полурез = главный рычаг VL; рекон/контракт/протокол внутри.
+- [plan-vl-refactor-research](plan-vl-refactor-research.md) — VL-рефактор до 3b DONE; тираж на 6 паков open; статусы/готчи внутри.
+- [plan-vl-profiler](plan-vl-profiler.md) — профайлер DONE (-Dirlite.profileVl=true); Hi-Z закрыт (ALU-bound).
+- [plan-vl-3c-bilateral](plan-vl-3c-bilateral.md) — 3c DONE; боевой пак = run/shaderpacks (полурез 0.5 + bilateral); контракт внутри.
 - [shader-settings](shader-settings.md) — настройки в Iris UI; гоча: boolean #define только при голом #ifdef.
-- [plan-irlights-settings-unification](plan-irlights-settings-unification.md) — единый дизайн настроек + ребрендинг DONE (3b3d79a).
 - [addon-iris-integration](addon-iris-integration.md) — (ref) 2 миксина биндят тени (ProgramSamplersBuilder + SamplerBindingCubeArray).
 - [ref-irlengine-photon-patch](ref-irlengine-photon-patch.md) — (ref) старый IRLEngine->Photon как образец; adapt uniform->SSBO.
-- [sync-workflow](sync-workflow.md) — dev-цикл шейдеров (Original/Modification/patches/run; Shadres gitignored); комменты в патчах <=1 строка.
+- [sync-workflow](sync-workflow.md) — dev-цикл шейдеров (Original/Modification/patches/run; Shadres gitignored); комменты <=1 строка.
 
-## Шейдер-паки — пайплайны (контракт + якоря + статус порта)
+## Шейдер-паки — пайплайны (контракт + якоря + статус)
 - [project-photon-outline-switch-to-old](project-photon-outline-switch-to-old.md) — КАНОН outline (Fresnel rim, default OFF); Photon = 2 патча.
 - [outline-target-entity-detection](outline-target-entity-detection.md) — IRLITE_OUTLINE_TARGET; done 5 паков; гоча PatchLibrary.extracted open.
 - [photon-pipeline](photon-pipeline.md) — Photon deferred, 4 хука; порт done (20 ops). Спутник [photon-bugfix](photon-bugfix.md).
 - [photon-bugfix](photon-bugfix.md) — трекер Photon; WATCH bob-flicker acne.
 - [shader-iterationrp-pipeline](shader-iterationrp-pipeline.md) — IterationRP #430 native SSBO, 3 хука; done; VL unshadowed.
 - [complementary-pipeline](complementary-pipeline.md) — Complementary forward #130; done (21 ops); VL half-res deferred2.
-- [rethinkingvoxels-pipeline](rethinkingvoxels-pipeline.md) — RethinkingVoxels (CR-форк); done (20 ops); дельты: composite.glsl, VL=colortex15.
+- [rethinkingvoxels-pipeline](rethinkingvoxels-pipeline.md) — RethinkingVoxels (CR-форк); done; дельты: composite.glsl, VL=colortex15.
 - [bsl-pipeline](bsl-pipeline.md) — BSL v10 #120 CRLF; done (29 ops).
 - [solas-pipeline](solas-pipeline.md) — Solas #130; done (19 ops, ru_RU); irislex.
-- [bliss-pipeline](bliss-pipeline.md) — Bliss #120; done (16 ops); dual-hook; MVI[3] bobbing «exactly once».
+- [bliss-pipeline](bliss-pipeline.md) — Bliss #120 dual-hook; CR-синхра DONE; «BSL-lib+4 дельты», TAAU cluster-fix; MVI[3] exactly-once.
+
+## Закрытые темы
+14 завершённых тем в `_index-closed.md` (не грузится); тема активна снова -> вернуть строку.
 
 ## Пользователь
 - Пользователя зовут Qualet.

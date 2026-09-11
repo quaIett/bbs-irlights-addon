@@ -1,5 +1,6 @@
 package qualet.irlite.client.diag;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -36,7 +37,7 @@ import org.lwjgl.opengl.GL33C;
  * pipeline is never stalled — and aggregated into 1-second windows printed to
  * the log and mirrored onto a small HUD overlay.</p>
  *
- * <p>Level 2 — differential sweep ({@link VlSweep}): cycles VlGlobals UBO flag
+ * <p>Level 2 — opt-in differential sweep ({@code -Dirlite.profileVlSweep=true}): cycles VlGlobals UBO flag
  * configs frame-by-frame to attribute the deferred2 (VL march) cost to shadows /
  * noise / morph / Hi-Z / cluster-cull, printing a table to the log and the chat.</p>
  */
@@ -86,7 +87,9 @@ public final class VlProfiler
     /** The Iris pass name of our VL march program (the sweep target). */
     public static final String PASS_VL = "deferred2";
 
-    private static final int POOL_LIMIT = 512;
+    private static final int POOL_LIMIT = 4096;
+    private static final boolean DETAILED = Boolean.getBoolean("irlite.profileShadowDetail");
+    private static final boolean SWEEP = Boolean.getBoolean("irlite.profileVlSweep");
     private static final long WINDOW_NS = 1_000_000_000L;
 
     /** Frames after which an unavailable FIFO head is presumed poisoned (a query
@@ -111,7 +114,17 @@ public final class VlProfiler
     private static int droppedSamples;
     private static int externalTimerSkips;
 
-    private static final Map<String, Stat> window = new HashMap<>();
+    private static final Map<String, TimingStats> window = new HashMap<>();
+    private static int completedGpuFrames;
+    private static int rejectedGpuFrames;
+    private static final FrameGpuTimings frameTimings = new FrameGpuTimings(
+        VlProfiler::recordFrame, frame -> {
+            rejectedGpuFrames++;
+            ProfileCapture.sample("frame", frame, "gpu-rejected", 1L);
+        });
+    private static boolean sessionStarted;
+    private static boolean pipelineChanged;
+    private static WeakReference<Object> sessionWorld;
     private static long windowStart;
     private static volatile List<String> hudLines = List.of();
 
@@ -120,7 +133,7 @@ public final class VlProfiler
      *  plus the frame-to-frame delta ("frame" — real frame time, so the log
      *  carries FPS next to the GPU pass costs). Flushed with the same 1-second
      *  window as a separate "[irlite] cpu:" line. */
-    private static final Map<String, Stat> cpuWindow = new HashMap<>();
+    private static final Map<String, TimingStats> cpuWindow = new HashMap<>();
     private static long lastFrameTickNs;
 
     /** Per-window work counters fed by the core-side ShadowBakeProbe (bakes per
@@ -163,25 +176,6 @@ public final class VlProfiler
         }
     }
 
-    private static final class Stat
-    {
-        long sumNs;
-        long maxNs;
-        int samples;
-
-        void add(long ns)
-        {
-            this.sumNs += ns;
-            this.maxNs = Math.max(this.maxNs, ns);
-            this.samples += 1;
-        }
-
-        double avgMs()
-        {
-            return this.samples == 0 ? 0D : this.sumNs / 1_000_000D / this.samples;
-        }
-    }
-
     /* ---- wiring from mixins ------------------------------------------------ */
 
     /** CompositeRendererTimerMixin, at createProgram RETURN: remembers which Iris
@@ -201,6 +195,7 @@ public final class VlProfiler
             return;
         }
         PASS_NAMES.put(program, name);
+        pipelineChanged = true;
     }
 
     public static String irisPassName(Object program)
@@ -217,6 +212,16 @@ public final class VlProfiler
      */
     public static void frameTick()
     {
+        if (enabled)
+        {
+            // An exception or a changed Iris anchor must not strand our timer.
+            if (activeQuery != -1)
+            {
+                frameTimings.invalidate(frameNo);
+                endPass();
+            }
+            frameTimings.seal(frameNo);
+        }
         // Frame boundary: no GL bracket is open here, so this is the only safe
         // place to flip the gate. Must run BEFORE the guard below, or turning
         // the profiler back on would never take effect.
@@ -233,6 +238,7 @@ public final class VlProfiler
                 if (!enabled)
                 {
                     hudLines = List.of();
+                    resetSession();
                 }
             }
         }
@@ -241,20 +247,64 @@ public final class VlProfiler
         {
             return;
         }
+        Object world = MinecraftClient.getInstance().world;
+        if (!sessionStarted || pipelineChanged || sessionWorld == null || sessionWorld.get() != world)
+        {
+            resetSession();
+            sessionStarted = true;
+            pipelineChanged = false;
+            sessionWorld = new WeakReference<>(world);
+            ProfileCapture.start(DETAILED, SWEEP);
+        }
         frameNo += 1;
+        frameTimings.begin(frameNo);
         long nowNs = System.nanoTime();
         if (lastFrameTickNs != 0L)
         {
-            cpuWindow.computeIfAbsent("frame", key -> new Stat()).add(nowNs - lastFrameTickNs);
+            cpuWindow.computeIfAbsent("frame", key -> new TimingStats()).add(nowNs - lastFrameTickNs);
+            ProfileCapture.sample("cpu", frameNo - 1, "frame", nowNs - lastFrameTickNs);
         }
         lastFrameTickNs = nowNs;
         drainCompleted();
-        VlSweep.tick(frameNo);
+        if (SWEEP) VlSweep.tick(frameNo);
         maybeFlushWindow();
         // AFTER the flush: this tick's bake counters land after the flush too,
         // so the window's tick count and its bake-frame span coincide exactly
         // (incrementing before the flush over-counted the first window by one).
         windowFrames += 1;
+    }
+
+    public static boolean detailedTimings()
+    {
+        return enabled && DETAILED;
+    }
+
+    public static void invalidateFrame()
+    {
+        if (enabled) frameTimings.invalidate(frameNo);
+    }
+
+    private static void resetSession()
+    {
+        for (Pending p : pending)
+        {
+            GL33C.glDeleteQueries(p.query);
+            allocatedQueries--;
+        }
+        pending.clear();
+        frameTimings.clear();
+        window.clear();
+        cpuWindow.clear();
+        counters.clear();
+        completedGpuFrames = rejectedGpuFrames = windowFrames = 0;
+        droppedSamples = externalTimerSkips = 0;
+        lastFrameTickNs = windowStart = 0L;
+        lastEvictionCount = lastEvictedKb = -1L;
+        sessionStarted = false;
+        sessionWorld = null;
+        hudLines = List.of();
+        ProfileCapture.close();
+        if (SWEEP) VlSweep.reset();
     }
 
     /**
@@ -285,7 +335,8 @@ public final class VlProfiler
         {
             return;
         }
-        cpuWindow.computeIfAbsent(name, key -> new Stat()).add(ns);
+        cpuWindow.computeIfAbsent(name, key -> new TimingStats()).add(ns);
+        ProfileCapture.sample("cpu", frameNo, name, ns);
     }
 
     /** Core-side ShadowBakeProbe.counter: accumulate into the 1-second window. */
@@ -296,6 +347,7 @@ public final class VlProfiler
             return;
         }
         counters.computeIfAbsent(key, k -> new long[1])[0] += amount;
+        ProfileCapture.sample("work", frameNo, key, amount);
     }
 
     /** Opens a GL_TIME_ELAPSED bracket. No-ops (and drops the sample) if a
@@ -309,6 +361,7 @@ public final class VlProfiler
         if (activeQuery != -1)
         {
             droppedSamples += 1;
+            frameTimings.invalidate(frameNo);
             return;
         }
         // Vanilla GlTimer (F3 GPU% / debug recorder) owns GL_TIME_ELAPSED for the
@@ -317,12 +370,14 @@ public final class VlProfiler
         if (GL33C.glGetQueryi(GL33C.GL_TIME_ELAPSED, GL33C.GL_CURRENT_QUERY) != 0)
         {
             externalTimerSkips += 1;
+            frameTimings.invalidate(frameNo);
             return;
         }
         int query = allocQuery();
         if (query == -1)
         {
             droppedSamples += 1;
+            frameTimings.invalidate(frameNo);
             return;
         }
         GL33C.glBeginQuery(GL33C.GL_TIME_ELAPSED, query);
@@ -332,10 +387,12 @@ public final class VlProfiler
             // and drop the sample instead of tracking a query that never began.
             freeQueries.addLast(query);
             droppedSamples += 1;
+            frameTimings.invalidate(frameNo);
             return;
         }
         activeQuery = query;
         activePass = name;
+        frameTimings.issued(frameNo);
     }
 
     /** Closes the currently active bracket, if any. */
@@ -343,6 +400,17 @@ public final class VlProfiler
     {
         if (!enabled || activeQuery == -1)
         {
+            return;
+        }
+        if (GL33C.glGetQueryi(GL33C.GL_TIME_ELAPSED, GL33C.GL_CURRENT_QUERY) != activeQuery)
+        {
+            // Never close a query owned by another profiler.
+            GL33C.glDeleteQueries(activeQuery);
+            allocatedQueries--;
+            droppedSamples++;
+            frameTimings.resolved(frameNo, activePass, -1L);
+            activeQuery = -1;
+            activePass = null;
             return;
         }
         GL33C.glEndQuery(GL33C.GL_TIME_ELAPSED);
@@ -359,7 +427,7 @@ public final class VlProfiler
      */
     public static void overrideVlGlobals()
     {
-        if (!enabled)
+        if (!enabled || !SWEEP)
         {
             return;
         }
@@ -398,6 +466,7 @@ public final class VlProfiler
                     pending.pollFirst();
                     GL33C.glDeleteQueries(head.query);
                     allocatedQueries -= 1;
+                    frameTimings.resolved(head.frame, head.pass, -1L);
                     System.out.println("[irlite] gpu: evicted stuck timer query for pass " + head.pass);
                     continue;
                 }
@@ -406,17 +475,42 @@ public final class VlProfiler
             long ns = GL33C.glGetQueryObjecti64(head.query, GL33C.GL_QUERY_RESULT);
             pending.pollFirst();
             freeQueries.addLast(head.query);
-            record(head.pass, head.frame, ns);
+            frameTimings.resolved(head.frame, head.pass, ns);
         }
     }
 
-    private static void record(String pass, long frame, long ns)
+    private static void recordFrame(long frame, Map<String, Long> nanos)
     {
-        window.computeIfAbsent(pass, key -> new Stat()).add(ns);
-        if (PASS_VL.equals(pass))
+        long bake = 0L;
+        boolean hasBake = false;
+        for (Map.Entry<String, Long> e : nanos.entrySet())
         {
-            VlSweep.addSample(frame, ns);
+            if (e.getKey().startsWith(BAKE_PREFIX))
+            {
+                bake += e.getValue();
+                hasBake = true;
+            }
         }
+        if (hasBake) nanos.put("bake", bake);
+        for (Map.Entry<String, TimingStats> e : window.entrySet())
+        {
+            if (!nanos.containsKey(e.getKey())) e.getValue().add(0L);
+        }
+        for (Map.Entry<String, Long> e : nanos.entrySet())
+        {
+            TimingStats stats = window.get(e.getKey());
+            if (stats == null)
+            {
+                stats = new TimingStats();
+                stats.addZeros(completedGpuFrames);
+                window.put(e.getKey(), stats);
+            }
+            stats.add(e.getValue());
+            ProfileCapture.sample("gpu", frame, e.getKey(), e.getValue());
+        }
+        completedGpuFrames++;
+        ProfileCapture.sample("frame", frame, "gpu-complete", 1L);
+        if (SWEEP && nanos.containsKey(PASS_VL)) VlSweep.addSample(frame, nanos.get(PASS_VL));
     }
 
     /* ---- 1-second window + HUD -------------------------------------------- */
@@ -434,47 +528,20 @@ public final class VlProfiler
             return;
         }
 
-        List<Map.Entry<String, Stat>> entries = new ArrayList<>(window.entrySet());
+        List<Map.Entry<String, TimingStats>> entries = new ArrayList<>(window.entrySet());
         entries.sort((a, b) -> Long.compare(b.getValue().sumNs, a.getValue().sumNs));
-
-        // Derived whole-bake total: the probe partitions the old single
-        // shadow-bake bracket into bake-* siblings, so their sum restores the
-        // number every earlier measurement ("shadow-bake 3.4-4.0 ms") reported.
-        long bakeSumNs = 0L;
-        int bakeSegments = 0;
-        int bakeSamples = 0;
-        for (Map.Entry<String, Stat> e : entries)
-        {
-            if (e.getKey().startsWith(BAKE_PREFIX))
-            {
-                bakeSumNs += e.getValue().sumNs;
-                bakeSamples = Math.max(bakeSamples, e.getValue().samples);
-                bakeSegments += 1;
-            }
-        }
 
         StringBuilder line = new StringBuilder("[irlite] gpu:");
         List<String> hud = new ArrayList<>();
         int shown = 0;
-        if (bakeSegments >= 2 && bakeSamples > 0)
+        for (Map.Entry<String, TimingStats> e : entries)
         {
-            String cell = String.format(Locale.ROOT, "bake %.2f ms", bakeSumNs / 1_000_000D / bakeSamples);
-            line.append(' ').append(cell);
-            hud.add(cell);
-            shown += 1;
-        }
-        for (Map.Entry<String, Stat> e : entries)
-        {
-            Stat s = e.getValue();
-            String cell = String.format(Locale.ROOT, "%s %.2f/%.2f ms",
-                e.getKey(), s.avgMs(), s.maxNs / 1_000_000D);
-            if (shown < 16)
-            {
-                line.append(shown == 0 ? " " : " | ").append(cell);
-            }
+            TimingStats s = e.getValue();
+            String cell = timingCell(e.getKey(), s);
+            line.append(shown == 0 ? " " : " | ").append(cell);
             if (hud.size() < 14)
             {
-                hud.add(cell);
+                hud.add(hudCell(e.getKey(), s));
             }
             shown += 1;
         }
@@ -482,6 +549,8 @@ public final class VlProfiler
         {
             line.append(" (no samples — shaders off or no passes yet)");
         }
+        line.append(" | complete frames ").append(completedGpuFrames)
+            .append(" | rejected frames ").append(rejectedGpuFrames);
         if (droppedSamples > 0)
         {
             line.append(" | dropped ").append(droppedSamples);
@@ -498,19 +567,18 @@ public final class VlProfiler
         // far slower than the GPU pass sum is attributable at a glance.
         if (!cpuWindow.isEmpty())
         {
-            List<Map.Entry<String, Stat>> cpuEntries = new ArrayList<>(cpuWindow.entrySet());
+            List<Map.Entry<String, TimingStats>> cpuEntries = new ArrayList<>(cpuWindow.entrySet());
             cpuEntries.sort((a, b) -> Long.compare(b.getValue().sumNs, a.getValue().sumNs));
             StringBuilder cpuLine = new StringBuilder("[irlite] cpu:");
             boolean firstCell = true;
-            for (Map.Entry<String, Stat> e : cpuEntries)
+            for (Map.Entry<String, TimingStats> e : cpuEntries)
             {
-                Stat s = e.getValue();
-                String cell = String.format(Locale.ROOT, "%s %.2f/%.2f ms",
-                    e.getKey(), s.avgMs(), s.maxNs / 1_000_000D);
+                TimingStats s = e.getValue();
+                String cell = timingCell(e.getKey(), s);
                 cpuLine.append(firstCell ? " " : " | ").append(cell);
                 if (hud.size() < 20)
                 {
-                    hud.add(cell);
+                    hud.add(hudCell(e.getKey(), s));
                 }
                 firstCell = false;
             }
@@ -559,7 +627,21 @@ public final class VlProfiler
 
         hudLines = hud;
         window.clear();
+        completedGpuFrames = rejectedGpuFrames = 0;
+        ProfileCapture.flush();
         windowStart = now;
+    }
+
+    private static String timingCell(String name, TimingStats stats)
+    {
+        return String.format(Locale.ROOT, "%s avg %.2f p50 %.2f p95 %.2f max %.2f ms (n=%d)",
+            name, stats.avgMs(), stats.medianMs(), stats.p95Ms(), stats.maxNs / 1_000_000D, stats.samples);
+    }
+
+    private static String hudCell(String name, TimingStats stats)
+    {
+        return String.format(Locale.ROOT, "%s %.2f | p50 %.2f p95 %.2f ms",
+            name, stats.avgMs(), stats.medianMs(), stats.p95Ms());
     }
 
     /** One-line VRAM/eviction snapshot via GL_NVX_gpu_memory_info, or null when
@@ -607,7 +689,7 @@ public final class VlProfiler
         }
         int y = 4;
         List<String> lines = hudLines;
-        String sweepStatus = VlSweep.statusLine();
+        String sweepStatus = SWEEP ? VlSweep.statusLine() : null;
         if (sweepStatus != null)
         {
             ctx.drawText(mc.textRenderer, sweepStatus, 4, y, 0xFFFFD080, true);

@@ -29,9 +29,20 @@ public class GameRendererLightMixin
         VlProfiler.frameTick();
         VlProfiler.beginPass(VlProfiler.PASS_BAKE);
         long pipelineT0 = System.nanoTime();
-        FramePipeline.frame(tickDelta, IrisShadersState::shadersDisabled, LightCollector::collect, () -> {});
-        VlProfiler.cpuSample("pipeline", System.nanoTime() - pipelineT0);
-        VlProfiler.endPass();
+        try
+        {
+            FramePipeline.frame(tickDelta, IrisShadersState::shadersDisabled, LightCollector::collect, () -> {});
+        }
+        catch (RuntimeException | Error e)
+        {
+            VlProfiler.invalidateFrame();
+            throw e;
+        }
+        finally
+        {
+            VlProfiler.cpuSample("pipeline", System.nanoTime() - pipelineT0);
+            VlProfiler.endPass();
+        }
     }
 
     /**

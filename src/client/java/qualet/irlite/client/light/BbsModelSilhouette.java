@@ -5,8 +5,6 @@ import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.cubic.ModelInstance;
 import mchorse.bbs_mod.cubic.animation.Animator;
 import mchorse.bbs_mod.cubic.data.model.*;
-import mchorse.bbs_mod.cubic.ik.ModelIKDebug;
-import mchorse.bbs_mod.cubic.physics.ModelPhysicsDebug;
 import mchorse.bbs_mod.cubic.render.vao.ModelVAO;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.MapType;
@@ -18,70 +16,110 @@ import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.settings.values.core.ValueTransform;
 import mchorse.bbs_mod.utils.colors.Color;
 import mchorse.bbs_mod.utils.pose.Transform;
-import net.fabricmc.loader.api.FabricLoader;
 import net.irisshaders.iris.Iris;
+import org.joml.Quaternionf;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.qualet.irl.light.shadow.CasterRevision;
 import qualet.irlite.mixin.client.bbs.FormStatePlayersAccessor;
 
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.WeakHashMap;
 
-/** Conservative BBS 2.3.1 adapter. Evaluates the supported cubic pose before the
- * bake, even when the model is off screen. Runtime animation/IK/physics/constraints,
- * state players, equipment, attachments and other renderers remain UNKNOWN.
- * In this supported subset every step AFTER applyPose is proven silhouette-neutral.
- * Never infer a known state merely from a stationary block or serialized Form. */
+/** Conservative BBS adapter, audited on 2.3.1-1.20.4 and 2.5.2-1.20.4 (the drifted
+ * members go through {@link BbsSilhouetteBridge}). Evaluates the supported cubic pose
+ * before the bake, even when the model is off screen. Runtime animation/IK/physics/
+ * constraints, state players, equipment, attachments, look-at, welds, the hybrid
+ * VAO+CPU path and other renderers remain UNKNOWN. In this supported subset every step
+ * AFTER applyPose is proven silhouette-neutral. Never infer a known state merely from a
+ * stationary block or serialized Form. */
 public final class BbsModelSilhouette
 {
-    static final boolean AUDITED = FabricLoader.getInstance().getModContainer("bbs")
-        .map(mod -> "2.3.1-1.20.4".equals(mod.getMetadata().getVersion().getFriendlyString())).orElse(false);
+    static final boolean AUDITED = BbsSilhouetteBridge.AUDITED;
     private final WeakHashMap<Object, Long> identities = new WeakHashMap<>();
     private final IdentityHashMap<ModelInstance, Long> geometryThisFrame = new IdentityHashMap<>();
     private final BbsModelPoseScratch poseScratch = new BbsModelPoseScratch();
     private long nextIdentity;
+    private boolean checked;
 
     public void beginFrame() { geometryThisFrame.clear(); }
 
     public CasterRevision sample(ModelBlockEntity block, float tickDelta)
     {
-        if (!AUDITED || block.getProperties() == null || ModelIKDebug.enabled || ModelPhysicsDebug.enabled)
-            return CasterRevision.UNKNOWN;
-        if (!(block.getProperties().getForm() instanceof ModelForm form) || form.getClass() != ModelForm.class
-            || !shadowlessChildren(form)
-            || !((FormStatePlayersAccessor) form).irlite$statePlayers().isEmpty()
-            || !empty(form.ik.get()) || !empty(form.physics.get()) || !empty(form.constraints.get())
-            || !form.ikTargetOverrides.isEmpty() || !form.poleTargetOverrides.isEmpty()
+        CasterRevision revision = sampleEvaluated(block, tickDelta);
+        if (!checked && revision.known() && Boolean.getBoolean("irlite.checkCasterRevisions"))
+        {
+            checked = true;
+            BbsModelSilhouetteChecks.run(this, block, tickDelta);
+        }
+        return revision;
+    }
+
+    /** Opt-in trace of why a caster stays UNKNOWN ({@code -Dirlite.debugCasterRevisions=true}):
+     * each distinct reason prints once per sampler, so "no reuse" is never silent. */
+    public static final boolean DEBUG = Boolean.getBoolean("irlite.debugCasterRevisions");
+    private final HashSet<String> reported = new HashSet<>();
+
+    private CasterRevision unknown(String reason)
+    {
+        if (DEBUG && reported.add(reason)) System.out.println("[irlite] caster-revision(cubic): UNKNOWN because " + reason);
+        return CasterRevision.UNKNOWN;
+    }
+
+    private CasterRevision sampleEvaluated(ModelBlockEntity block, float tickDelta)
+    {
+        if (!AUDITED) return unknown("BBS version/layout not audited");
+        if (block.getProperties() == null) return unknown("model block without properties");
+        if (BbsSilhouetteBridge.debugOverlays()) return unknown("IK/physics debug overlay enabled");
+        if (!(block.getProperties().getForm() instanceof ModelForm form) || form.getClass() != ModelForm.class)
+            return unknown("form is not a plain ModelForm");
+        if (!shadowlessChildren(form)) return unknown("body parts other than leaf light forms");
+        if (!((FormStatePlayersAccessor) form).irlite$statePlayers().isEmpty()) return unknown("animation state players active");
+        if (!empty(form.ik.get()) || !empty(form.physics.get()) || !empty(form.constraints.get()))
+            return unknown("IK/physics/constraints configured");
+        if (!form.ikTargetOverrides.isEmpty() || !form.poleTargetOverrides.isEmpty()
             || !form.ikTargetWeights.isEmpty() || !form.poleTargetWeights.isEmpty()
             || !form.ikControlOverrides.isEmpty()
             || !form.physicsTargetOverrides.isEmpty() || !form.physicsTargetWeights.isEmpty()
             || !form.physicsControlOverrides.isEmpty() || form.windControlOverride != null)
-            return CasterRevision.UNKNOWN;
+            return unknown("runtime IK/physics/wind overrides");
 
         if (!(FormUtilsClient.getRenderer(form) instanceof ModelFormRenderer renderer)
             || renderer.getClass() != ModelFormRenderer.class)
-            return CasterRevision.UNKNOWN;
+            return unknown("renderer is not the plain ModelFormRenderer");
         // A cache read only: do not cause an off-screen model/texture to load.
         ModelInstance instance = BBSModClient.getModels().models.get(form.model.get());
-        if (instance == null || instance.getClass() != ModelInstance.class
-            || !(instance.model instanceof Model model) || model.getClass() != Model.class
-            || instance.procedural || !instance.itemsMain.isEmpty() || !instance.itemsOff.isEmpty()
-            || !instance.armorSlots.isEmpty() || instance.view != null)
-            return CasterRevision.UNKNOWN;
+        if (instance == null) return unknown("model not loaded: " + form.model.get());
+        if (instance.getClass() != ModelInstance.class) return unknown("subclassed ModelInstance");
+        if (!(instance.model instanceof Model model) || model.getClass() != Model.class)
+            return unknown("non-cubic model (BOBJ/other): " + form.model.get());
+        if (BbsSilhouetteBridge.procedural(instance)) return unknown("procedural model: " + form.model.get());
+        if (!BbsSilhouetteBridge.itemsMain(instance).isEmpty() || !BbsSilhouetteBridge.itemsOff(instance).isEmpty()
+            || !BbsSilhouetteBridge.armorSlots(instance).isEmpty())
+            return unknown("item/armor slots configured: " + form.model.get());
+        if (BbsSilhouetteBridge.view(instance) != null) return unknown("look-at configured: " + form.model.get());
+        // BBS 2.5.2: welded seams deform cubes per pose, and the hybrid path mixes GPU VAO
+        // draws (per-material textures) with CPU draws of the same model. A partially baked
+        // model (shape-keyed meshes: VAOs present yet not VAO-rendered) is that hybrid path.
+        if (!BbsSilhouetteBridge.weldBindings(instance).isEmpty()) return unknown("welds configured: " + form.model.get());
+        if (!instance.getVaos().isEmpty() && !instance.isVAORendered()) return unknown("hybrid VAO+CPU render path: " + form.model.get());
+        Vector3f configScale = BbsSilhouetteBridge.scale(instance);
+        if (configScale == null) return unknown("config scale unavailable");
 
         renderer.ensureAnimator(tickDelta);
-        if (!(renderer.getAnimator() instanceof Animator animator) || animator.getClass() != Animator.class
-            || animator.active != null || animator.lastActive != null || animator.basePre != null
+        if (!(renderer.getAnimator() instanceof Animator animator) || animator.getClass() != Animator.class)
+            return unknown("animator is not the plain Animator");
+        if (animator.active != null || animator.lastActive != null || animator.basePre != null
             || animator.basePost != null || !animator.actions.isEmpty())
-            return CasterRevision.UNKNOWN;
+            return unknown("animator actions active");
 
         Signature transform = new Signature().word(block.getPos().asLong()).transform(block.getProperties().getTransform())
             .transform(form.transform.get()).transform(form.transformOverlay.get());
         for (ValueTransform extra : form.additionalTransforms) transform.transform(extra.get());
-        Signature morph = new Signature().word(identity(form)).vec(instance.scale);
+        Signature morph = new Signature().word(identity(form)).vec(configScale);
         for (var entry : new TreeMap<>(form.shapeKeys.get().shapeKeys).entrySet())
             morph.string(entry.getKey()).number(entry.getValue());
 
@@ -101,6 +139,10 @@ public final class BbsModelSilhouette
                 pose.string(group.id).transform(group.current).color(group.color).word(group.visible ? 1 : 0);
                 if (group.orient == null) pose.word(0);
                 else pose.word(1).number(group.orient.x).number(group.orient.y).number(group.orient.z).number(group.orient.w);
+                // 2.5.2 IK stretch shift (render matrix input ahead of the bone's own translate).
+                Vector3f offset = BbsSilhouetteBridge.offset(group);
+                if (offset == null) pose.word(0);
+                else pose.word(1).vec(offset);
             }
         }
         finally
@@ -110,14 +152,15 @@ public final class BbsModelSilhouette
 
         Signature material = new Signature().color(form.color.get()).word(form.visible.get() ? 1 : 0)
             .word(form.shaderShadow.get() ? 1 : 0).word(form.additiveColor.get() ? 1 : 0)
-            .word(instance.culling ? 1 : 0);
-        Link defaultTexture = form.texture.get() == null ? instance.texture : form.texture.get();
-        if (!texture(material, defaultTexture)) return CasterRevision.UNKNOWN;
+            .word(BbsSilhouetteBridge.culling(instance) ? 1 : 0);
+        Link modelTexture = BbsSilhouetteBridge.texture(instance);
+        Link defaultTexture = form.texture.get() == null ? modelTexture : form.texture.get();
+        if (!texture(material, defaultTexture)) return unknown("default texture not loaded/versioned: " + defaultTexture);
         // Iterate the actual VAO material keys, not just the editor's material list.
         if (instance.isVAORendered())
         {
             boolean singleMaterial = instance.materials.size() <= 1;
-            Link fallback = singleMaterial ? defaultTexture : instance.texture;
+            Link fallback = singleMaterial ? defaultTexture : modelTexture;
             for (ModelGroup group : groups)
             {
                 Map<String, ModelVAO> vaos = instance.getVaos().get(group);
@@ -128,7 +171,7 @@ public final class BbsModelSilhouette
                     if (!singleMaterial && link == null) link = form.materialTextures.getLink(name);
                     if (!singleMaterial && link == null) link = instance.getMaterialTexture(name, fallback);
                     // Null leaves the prior draw's texture bound: view/order dependent.
-                    if (!texture(material.string(name), link)) return CasterRevision.UNKNOWN;
+                    if (!texture(material.string(name), link)) return unknown("material texture not loaded/versioned: " + name + " -> " + link);
                 }
             }
         }
@@ -142,7 +185,7 @@ public final class BbsModelSilhouette
             geometryThisFrame.put(instance, geometry);
         }
         Object pipeline = Iris.getPipelineManager().getPipelineNullable();
-        if (pipeline == null) return CasterRevision.UNKNOWN;
+        if (pipeline == null) return unknown("no Iris pipeline");
         long resources = new Signature().word(ShadowResourceVersions.reloadVersion()).word(identity(pipeline)).value;
         return new CasterRevision(true, transform.value, pose.value, morph.value, geometry, material.value, resources);
     }
@@ -246,7 +289,18 @@ public final class BbsModelSilhouette
         Signature vec(Vector3f v) { return number(v.x).number(v.y).number(v.z); }
         Signature vec(Vector2f v) { return number(v.x).number(v.y); }
         Signature color(Color v) { return number(v.r).number(v.g).number(v.b).number(v.a); }
-        Signature transform(Transform t) { return t == null ? word(0) : word(1).vec(t.translate).vec(t.rotate).vec(t.rotate2).vec(t.scale); }
+        /** Rotation storage drifts by BBS version: rotate + rotate2 euler triples (2.3.1) or
+         * a rotation mode with the quaternion (2.5.2); both representations are hashed whole. */
+        Signature transform(Transform t)
+        {
+            if (t == null) return word(0);
+            word(1).vec(t.translate).vec(t.rotate).vec(t.scale);
+            Vector3f rotate2 = BbsSilhouetteBridge.rotate2(t);
+            if (rotate2 != null) return vec(rotate2);
+            word(BbsSilhouetteBridge.rotationMode(t));
+            Quaternionf quat = BbsSilhouetteBridge.quat(t);
+            return quat == null ? this : number(quat.x).number(quat.y).number(quat.z).number(quat.w);
+        }
         Signature string(String s)
         {
             word(s.length());

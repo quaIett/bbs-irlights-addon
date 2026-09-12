@@ -5,10 +5,12 @@ import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.forms.MobForm;
 import mchorse.bbs_mod.forms.renderers.MobFormRenderer;
 import mchorse.bbs_mod.resources.Link;
+import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.model.ModelPart;
 import net.minecraft.client.render.entity.VillagerEntityRenderer;
 import net.minecraft.entity.passive.VillagerEntity;
+import org.joml.Vector3f;
 import qualet.irlite.mixin.client.bbs.MobFormRendererAccessor;
 
 import java.util.List;
@@ -26,9 +28,29 @@ final class BbsMobSilhouetteChecks
         float x = transform.translate.x;
         try { transform.translate.x += 0.25f; require(!baseline.equals(sampler.sample(block, td)), "translation"); }
         finally { transform.translate.x = x; }
-        x = transform.rotate2.x;
-        try { transform.rotate2.x += 0.25f; require(!baseline.equals(sampler.sample(block, td)), "second rotation"); }
-        finally { transform.rotate2.x = x; }
+        Vector3f rotate2 = BbsSilhouetteBridge.rotate2(transform);
+        if (rotate2 != null)
+        {
+            x = rotate2.x;
+            try { rotate2.x += 0.25f; require(!baseline.equals(sampler.sample(block, td)), "second rotation"); }
+            finally { rotate2.x = x; }
+        }
+        else
+        {
+            // BBS 2.5.2 replaced rotate2 with quaternion rotation storage.
+            Transform saved = transform.copy();
+            try
+            {
+                Transform.class.getMethod("setModeQuaternion").invoke(transform);
+                BbsSilhouetteBridge.quat(transform).rotateY(0.3f);
+                require(!baseline.equals(sampler.sample(block, td)), "quaternion rotation");
+            }
+            catch (ReflectiveOperationException failure)
+            {
+                throw new AssertionError("Caster revision regression: quaternion rotation probe", failure);
+            }
+            finally { transform.copy(saved); }
+        }
         x = transform.scale.x;
         try { transform.scale.x *= 1.25f; require(!baseline.equals(sampler.sample(block, td)), "scale"); }
         finally { transform.scale.x = x; }

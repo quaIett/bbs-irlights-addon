@@ -4,6 +4,7 @@ import mchorse.bbs_mod.cubic.data.model.ModelGroup;
 import mchorse.bbs_mod.utils.colors.Color;
 import mchorse.bbs_mod.utils.pose.Transform;
 import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.Arrays;
 import java.util.List;
@@ -49,6 +50,8 @@ final class BbsModelPoseScratch
             state.color = group.color;
             state.lighting = group.lighting;
             state.orient = group.orient;
+            // BBS 2.5.2 IK stretch shift; reset() nulls it, so it is restored like orient.
+            state.offset = BbsSilhouetteBridge.offset(group);
             captured = i + 1;
             group.current = state.isolatedTransform;
             group.color = state.isolatedColor;
@@ -66,10 +69,12 @@ final class BbsModelPoseScratch
             state.group.color = state.color;
             state.group.lighting = state.lighting;
             state.group.orient = state.orient;
+            BbsSilhouetteBridge.setOffset(state.group, state.offset);
             state.group = null;
             state.current = null;
             state.color = null;
             state.orient = null;
+            state.offset = null;
         }
         active = false;
     }
@@ -83,5 +88,6 @@ final class BbsModelPoseScratch
         Color color;
         float lighting;
         Quaternionf orient;
+        Vector3f offset;
     }
 }

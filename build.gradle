@@ -116,7 +116,18 @@ dependencies {
 
     modImplementation "net.fabricmc.fabric-api:fabric-api:${V.fabricApi}"
 
-    modImplementation files(V.bbsJar)
+    // Optional dev-client host override: -PbbsRuntimeJar=<path to another bbs-*.jar>.
+    // Compilation stays on V.bbsJar (the audited compile axis); only runClient boots the
+    // given jar, so one build is exercised against another BBS release (e.g. the
+    // caster-revision port checks on 2.5.2 with -PclientJvmArgs=-Dirlite.checkCasterRevisions=true).
+    def bbsRuntimeJar = project.findProperty('bbsRuntimeJar')?.toString()
+    if (bbsRuntimeJar) {
+        logger.lifecycle("IRLite dev runtime BBS override: ${bbsRuntimeJar}")
+        modCompileOnly files(V.bbsJar)
+        modLocalRuntime files(bbsRuntimeJar)
+    } else {
+        modImplementation files(V.bbsJar)
+    }
 
     // --- Shared BBS-free engine: light SSBO + .irlights patcher (irl-core) ---
     // Per-version Loom module from mavenLocal: modClientImplementation remaps it from

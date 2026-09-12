@@ -18,6 +18,7 @@ import org.qualet.irl.light.shadow.CasterRevision;
 import qualet.irlite.mixin.client.bbs.FormStatePlayersAccessor;
 import qualet.irlite.mixin.client.bbs.MobFormRendererAccessor;
 
+import java.util.HashSet;
 import java.util.WeakHashMap;
 
 /** Villager MobForms, including the baseline scene. Runs the actual vanilla+BBS
@@ -48,36 +49,49 @@ public final class BbsMobSilhouette
         return revision;
     }
 
+    private final HashSet<String> reported = new HashSet<>();
+
+    /** @see BbsModelSilhouette#DEBUG */
+    private CasterRevision unknown(String reason)
+    {
+        if (BbsModelSilhouette.DEBUG && reported.add(reason)) System.out.println("[irlite] caster-revision(mob): UNKNOWN because " + reason);
+        return CasterRevision.UNKNOWN;
+    }
+
     private CasterRevision sampleEvaluated(ModelBlockEntity block, float tickDelta)
     {
-        if (!BbsModelSilhouette.AUDITED || block.getProperties() == null
-            || !(block.getProperties().getForm() instanceof MobForm form) || form.getClass() != MobForm.class
-            || !"minecraft:villager".equals(form.mobID.get()) || !form.mobNBT.get().isBlank() || form.texture.get() != null
-            || !BbsModelSilhouette.shadowlessChildren(form)
-            || !((FormStatePlayersAccessor) form).irlite$statePlayers().isEmpty()
-            || MobFormRenderer.getCurrentPose() != null || !MobFormRenderer.getCache().isEmpty())
-            return CasterRevision.UNKNOWN;
+        if (!BbsModelSilhouette.AUDITED) return unknown("BBS version/layout not audited");
+        if (block.getProperties() == null) return unknown("model block without properties");
+        if (!(block.getProperties().getForm() instanceof MobForm form) || form.getClass() != MobForm.class)
+            return unknown("form is not a plain MobForm");
+        if (!"minecraft:villager".equals(form.mobID.get())) return unknown("mob is not a villager: " + form.mobID.get());
+        if (!form.mobNBT.get().isBlank() || form.texture.get() != null) return unknown("villager with NBT or texture override");
+        if (!BbsModelSilhouette.shadowlessChildren(form)) return unknown("body parts other than leaf light forms");
+        if (!((FormStatePlayersAccessor) form).irlite$statePlayers().isEmpty()) return unknown("animation state players active");
+        if (MobFormRenderer.getCurrentPose() != null || !MobFormRenderer.getCache().isEmpty())
+            return unknown("sampled inside a BBS mob render");
         if (!(FormUtilsClient.getRenderer(form) instanceof MobFormRenderer renderer)
-            || renderer.getClass() != MobFormRenderer.class) return CasterRevision.UNKNOWN;
+            || renderer.getClass() != MobFormRenderer.class) return unknown("renderer is not the plain MobFormRenderer");
         var access = (MobFormRendererAccessor) renderer;
         access.irlite$ensureEntity();
-        if (!(access.irlite$entity() instanceof VillagerEntity entity) || entity.getClass() != VillagerEntity.class
-            || entity.hasCustomName()) return CasterRevision.UNKNOWN;
-        for (var stack : entity.getItemsEquipped()) if (!stack.isEmpty()) return CasterRevision.UNKNOWN;
+        if (!(access.irlite$entity() instanceof VillagerEntity entity) || entity.getClass() != VillagerEntity.class)
+            return unknown("renderer entity is not a plain VillagerEntity");
+        if (entity.hasCustomName()) return unknown("villager with custom name");
+        for (var stack : entity.getItemsEquipped()) if (!stack.isEmpty()) return unknown("villager with equipment");
         if (entity instanceof ISelectorOwnerProvider provider)
         {
             provider.getOwner().check();
             // Dispatcher wraps the vanilla render with BBS's morph renderer.
             // A nested morph could issue direct GL draws instead of using our sink.
-            if (provider.getOwner().getForm() != null) return CasterRevision.UNKNOWN;
+            if (provider.getOwner().getForm() != null) return unknown("villager morphed by a selector");
         }
         var dispatcher = MinecraftClient.getInstance().getEntityRenderDispatcher();
-        if (dispatcher.shouldRenderHitboxes()
-            || !(dispatcher.getRenderer(entity) instanceof VillagerEntityRenderer vanilla)
+        if (dispatcher.shouldRenderHitboxes()) return unknown("hitboxes shown");
+        if (!(dispatcher.getRenderer(entity) instanceof VillagerEntityRenderer vanilla)
             || vanilla.getClass() != VillagerEntityRenderer.class
-            || vanilla.getModel().getClass() != VillagerResemblingModel.class) return CasterRevision.UNKNOWN;
+            || vanilla.getModel().getClass() != VillagerResemblingModel.class) return unknown("non-vanilla villager renderer/model");
         Object pipeline = Iris.getPipelineManager().getPipelineNullable();
-        if (pipeline == null) return CasterRevision.UNKNOWN;
+        if (pipeline == null) return unknown("no Iris pipeline");
 
         var transform = new BbsModelSilhouette.Signature().word(block.getPos().asLong())
             .transform(block.getProperties().getTransform()).transform(form.transform.get()).transform(form.transformOverlay.get());

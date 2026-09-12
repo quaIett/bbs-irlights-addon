@@ -53,13 +53,12 @@ import qualet.irlite.IrliteConfig;
 import qualet.irlite.client.light.LightCollector;
 import qualet.irlite.client.light.BbsModelSilhouette;
 import qualet.irlite.client.light.BbsMobSilhouette;
+import qualet.irlite.client.light.BbsSilhouetteBridge;
 import qualet.irlite.forms.PointLightForm;
 import qualet.irlite.forms.SpotlightForm;
 import qualet.irlite.mixin.client.bbs.FilmsAccessor;
 import qualet.irlite.mixin.client.bbs.WorldBlockEntityTickersAccessor;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.List;
 
 /**
@@ -95,8 +94,19 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     public CasterRevision revision(Object caster, int type, float tickDelta)
     {
         if (type != CasterType.MODEL_BLOCK || !(caster instanceof ModelBlockEntity block)) return CasterRevision.UNKNOWN;
-        return block.getProperties() != null && block.getProperties().getForm() instanceof mchorse.bbs_mod.forms.forms.MobForm
-            ? mobSilhouettes.sample(block, tickDelta) : silhouettes.sample(block, tickDelta);
+        try
+        {
+            return block.getProperties() != null && block.getProperties().getForm() instanceof mchorse.bbs_mod.forms.forms.MobForm
+                ? mobSilhouettes.sample(block, tickDelta) : silhouettes.sample(block, tickDelta);
+        }
+        catch (RuntimeException | LinkageError failure)
+        {
+            // INVARIANT 4 scoping: a probe failure (BBS drift past the audited layouts)
+            // degrades to UNKNOWN for that caster. Reported once so it never hides as
+            // "no reuse"; the self-test's AssertionError deliberately propagates.
+            BbsSilhouetteBridge.reportFailure(failure);
+            return CasterRevision.UNKNOWN;
+        }
     }
     /** Match the light collector's camera horizon. This removes the old 72-block
      *  mismatch for co-located lamp/caster scenes; the global bounded pool remains
@@ -199,6 +209,7 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
             return;
         }
 
+        int collected = 0;
         for (int idx = 0, n = tickers.size(); idx < n; idx++)
         {
             BlockEntityTickInvoker invoker = tickers.get(idx);
@@ -242,8 +253,18 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
             }
             Transform t = props.getTransform();
             emitModelBlock(sink, mbe, form, t);
+            collected++;
+        }
+        if (BbsModelSilhouette.DEBUG && collected != lastModelBlocks)
+        {
+            // -Dirlite.debugCasterRevisions: a caster that stops being collected
+            // is invisible to the per-caster UNKNOWN trace, so report set changes.
+            System.out.println("[irlite] caster-collect: model blocks " + collected + " (was " + lastModelBlocks + ")");
+            lastModelBlocks = collected;
         }
     }
+
+    private static int lastModelBlocks = -1;
 
     private static void collectFilmReplays(double camX, double camY, double camZ, float tickDelta, OccluderSink sink)
     {
@@ -550,15 +571,6 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     private static final float[] innerExt = new float[3];
     private static final double[] innerCenter = new double[3];
 
-    /** BBS 2.3 exposes the ModelInstance config scale as a public FIELD; BBS 2.4
-     *  replaced it with getScale() — a direct field read compiles against the
-     *  2.3.1 jar but throws NoSuchFieldError on 2.4 hosts. One addon jar spans
-     *  both (the UITrackpad#limit precedent), so resolve whichever accessor
-     *  exists ONCE and cache it. */
-    private static Field cfgScaleField;
-    private static Method cfgScaleGetter;
-    private static boolean cfgScaleResolved;
-
     /**
      * Fold every transform source BBS stacks between the hitbox and the drawn
      * pixels INSIDE the caster's anchor transform: {@code form.transform} +
@@ -656,26 +668,16 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
         }
     }
 
-    /** @see #cfgScaleField */
+    /** BBS 2.3 exposes the ModelInstance config scale as a public FIELD; BBS 2.4+
+     *  replaced it with getScale() — a direct field read compiles against the
+     *  2.3.1 jar but throws NoSuchFieldError on newer hosts. One addon jar spans
+     *  both (the UITrackpad#limit precedent): {@link BbsSilhouetteBridge} resolves
+     *  whichever accessor exists ONCE; null (unresolved host) folds the identity. */
     private static Vector3f modelConfigScale(ModelInstance model)
     {
         try
         {
-            if (!cfgScaleResolved)
-            {
-                try
-                {
-                    cfgScaleField = ModelInstance.class.getField("scale");
-                }
-                catch (Throwable t)
-                {
-                    cfgScaleGetter = ModelInstance.class.getMethod("getScale");
-                }
-                cfgScaleResolved = true;
-            }
-            Object s = cfgScaleField != null ? cfgScaleField.get(model)
-                : cfgScaleGetter != null ? cfgScaleGetter.invoke(model) : null;
-            return s instanceof Vector3f v ? v : null;
+            return BbsSilhouetteBridge.scale(model);
         }
         catch (Throwable t)
         {

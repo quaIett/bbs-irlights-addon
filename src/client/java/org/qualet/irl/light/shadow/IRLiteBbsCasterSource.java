@@ -1,6 +1,5 @@
 package org.qualet.irl.light.shadow;
 
-import io.netty.util.collection.IntObjectMap;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.blocks.entities.ModelProperties;
@@ -301,20 +300,17 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
                 continue;
             }
 
-            for (IntObjectMap.PrimitiveEntry<IEntity> e : ctrl.getEntities().entries())
+            // BBS 2.6 keys the film's entities by the replay's stable id, not its list index.
+            java.util.Map<String, IEntity> entities = ctrl.getEntities();
+            for (int rid = 0; rid < replays.size(); rid++)
             {
-                int rid = e.key();
-                if (rid < 0 || rid >= replays.size())
-                {
-                    continue;
-                }
                 Replay replay = replays.get(rid);
                 if (replay == null || replay.actor.get())
                 {
                     // Skip actor replays — real actors come via the entity arm.
                     continue;
                 }
-                IEntity ent = e.value();
+                IEntity ent = entities.get(replay.getId());
                 if (ent == null)
                 {
                     continue;

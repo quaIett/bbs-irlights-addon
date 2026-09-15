@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_17",
   "client": [
     "ExtraFormSectionMixin",
+    "FilmStencilPickerMixin",
     "FormUtilsClientMixin",
     "GameRendererLightMixin",
     "L10nMixin",

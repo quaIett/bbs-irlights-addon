@@ -1,5 +1,6 @@
 package qualet.irlite.client.light;
 
+import mchorse.bbs_mod.forms.renderers.mob.MobRenderContext;
 import net.minecraft.client.model.ModelPart;
 
 import java.util.Arrays;
@@ -42,18 +43,15 @@ final class BbsMobPoseScratch
         active = false;
     }
 
-    /** BBS cleanup can fail through a missing accessor or optional integration.
-     * Always unwind every stage, preserving the original evaluation failure. */
-    void release(Cleanup cleanup, Throwable evaluationFailure)
+    /** BBS cleanup can fail through an optional integration. Always unwind every stage,
+     * preserving the original evaluation failure. BBS 2.6: popping the render context puts
+     * back what its pose overwrote; the captured states then restore everything else. */
+    void release(MobRenderContext context, Throwable evaluationFailure)
     {
         Throwable failure = evaluationFailure;
-        try { cleanup.clearPose(); }
-        catch (RuntimeException | Error error) { failure = accumulate(failure, error); }
-        try { cleanup.clearOverlay(); }
+        try { if (context != null) context.pop(); }
         catch (RuntimeException | Error error) { failure = accumulate(failure, error); }
         try { release(); }
-        catch (RuntimeException | Error error) { failure = accumulate(failure, error); }
-        try { cleanup.clearCache(); }
         catch (RuntimeException | Error error) { failure = accumulate(failure, error); }
         if (evaluationFailure == null)
         {
@@ -67,13 +65,6 @@ final class BbsMobPoseScratch
         if (first == null) return next;
         if (first != next) first.addSuppressed(next);
         return first;
-    }
-
-    interface Cleanup
-    {
-        void clearPose();
-        void clearOverlay();
-        void clearCache();
     }
 
     private static final class PartState

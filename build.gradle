@@ -14,7 +14,7 @@ def mcVersions = [
         minecraft: '1.20.1',
         yarn     : '1.20.1+build.10',
         fabricApi: '0.92.9+1.20.1',
-        bbsJar   : 'libs/bbs-2.3.1-1.20.1.jar',
+        bbsJar   : 'libs/bbs-2.6-1.20.1.jar',
         sodium   : 'mc1.20.1-0.5.11',
         iris     : '1.7.2+1.20.1',
         lwjglPin : '3.3.1',
@@ -23,7 +23,7 @@ def mcVersions = [
         minecraft: '1.20.4',
         yarn     : '1.20.4+build.1',
         fabricApi: '0.91.1+1.20.4',
-        bbsJar   : 'libs/bbs-2.3.1-1.20.4.jar',
+        bbsJar   : 'libs/bbs-2.6-1.20.4.jar',
         sodium   : 'mc1.20.4-0.5.8',
         iris     : '1.7.2+1.20.4',
         lwjglPin : null,
@@ -57,7 +57,11 @@ loom {
             // Dev conveniences for automated runtime checks:
             //   -Pquickplay="World name"  auto-joins that singleplayer save,
             //   -PclientJvmArgs="-Dirlite.profileVl=true"  forwards JVM flags
-            // (e.g. the VL/shadow profilers) into the forked client.
+            // (e.g. the VL/shadow profilers) into the forked client,
+            //   -PrunDir=runs/1.20.1  keeps a per-version game dir apart from run/.
+            if (project.hasProperty('runDir')) {
+                runDir project.property('runDir').toString()
+            }
             if (project.hasProperty('quickplay')) {
                 programArgs '--quickPlaySingleplayer', project.property('quickplay').toString()
             }

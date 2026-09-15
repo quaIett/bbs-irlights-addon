@@ -2,11 +2,9 @@ package qualet.irlite.mixin.client;
 
 import mchorse.bbs_mod.ui.film.controller.UIFilmController;
 import mchorse.bbs_mod.ui.framework.UIContext;
-import mchorse.bbs_mod.ui.utils.Area;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import qualet.irlite.client.forms.SpotGuideDrag;
 
@@ -14,11 +12,8 @@ import qualet.irlite.client.forms.SpotGuideDrag;
  * Film-editor counterpart of {@link UIPickableFormRendererMixin}: routes clicks
  * on IRLite's in-world spotlight guide handles (stencil entries registered for
  * the selected replay by SpotlightFormRenderer) into {@link SpotGuideDrag}
- * before BBS's gizmo/replay picking, and drives the drag once per frame.
- *
- * <p>The drag update injects at the HEAD of {@code renderPickingPreview} (not
- * TAIL) on purpose: the method early-returns when nothing is picked under the
- * cursor, and mid-drag the cursor often leaves the handle's own pixels.</p>
+ * before BBS's gizmo/replay picking. The per-frame drag update lives in
+ * {@link FilmStencilPickerMixin}, where BBS 2.6 moved the picking pass.
  */
 @Mixin(UIFilmController.class)
 public abstract class UIFilmControllerMixin
@@ -41,13 +36,5 @@ public abstract class UIFilmControllerMixin
         {
             cir.setReturnValue(true);
         }
-    }
-
-    @Inject(method = "renderPickingPreview", at = @At("HEAD"))
-    private void irlite$updateGuideDrag(UIContext context, Area area, CallbackInfo ci)
-    {
-        UIFilmController self = (UIFilmController) (Object) this;
-
-        SpotGuideDrag.update(self, context);
     }
 }

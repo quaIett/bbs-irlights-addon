@@ -4,6 +4,8 @@ import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.forms.MobForm;
 import mchorse.bbs_mod.forms.renderers.MobFormRenderer;
+import mchorse.bbs_mod.forms.renderers.mob.MobRenderContext;
+import mchorse.bbs_mod.forms.renderers.mob.MobRig;
 import mchorse.bbs_mod.selectors.ISelectorOwnerProvider;
 import net.irisshaders.iris.Iris;
 import net.minecraft.client.MinecraftClient;
@@ -27,12 +29,6 @@ import java.util.WeakHashMap;
  * The whitelist excludes renderers/features with direct GPU work or labels/items. */
 public final class BbsMobSilhouette
 {
-    private static final BbsMobPoseScratch.Cleanup BBS_CLEANUP = new BbsMobPoseScratch.Cleanup()
-    {
-        @Override public void clearPose() { MobFormRendererAccessor.irlite$pose(null); }
-        @Override public void clearOverlay() { MobFormRendererAccessor.irlite$overlay(null); }
-        @Override public void clearCache() { MobFormRenderer.getCache().clear(); }
-    };
     private final WeakHashMap<Object, Long> identities = new WeakHashMap<>();
     private final BbsMobPoseScratch poseScratch = new BbsMobPoseScratch();
     private long nextIdentity;
@@ -68,14 +64,16 @@ public final class BbsMobSilhouette
         if (!form.mobNBT.get().isBlank() || form.texture.get() != null) return unknown("villager with NBT or texture override");
         if (!BbsModelSilhouette.shadowlessChildren(form)) return unknown("body parts other than leaf light forms");
         if (!((FormStatePlayersAccessor) form).irlite$statePlayers().isEmpty()) return unknown("animation state players active");
-        if (MobFormRenderer.getCurrentPose() != null || !MobFormRenderer.getCache().isEmpty())
-            return unknown("sampled inside a BBS mob render");
+        if (MobRenderContext.current() != null) return unknown("sampled inside a BBS mob render");
         if (!(FormUtilsClient.getRenderer(form) instanceof MobFormRenderer renderer)
             || renderer.getClass() != MobFormRenderer.class) return unknown("renderer is not the plain MobFormRenderer");
         var access = (MobFormRendererAccessor) renderer;
         access.irlite$ensureEntity();
         if (!(access.irlite$entity() instanceof VillagerEntity entity) || entity.getClass() != VillagerEntity.class)
             return unknown("renderer entity is not a plain VillagerEntity");
+        // BBS 2.6: the form pose rides a MobRenderContext bound to the renderer's rig.
+        MobRig rig = renderer.getRig();
+        if (rig == null) return unknown("no mob rig for the villager renderer");
         if (entity.hasCustomName()) return unknown("villager with custom name");
         for (var stack : entity.getItemsEquipped()) if (!stack.isEmpty()) return unknown("villager with equipment");
         if (entity instanceof ISelectorOwnerProvider provider)
@@ -101,6 +99,7 @@ public final class BbsMobSilhouette
         var stream = new VertexSignature();
         var model = vanilla.getModel();
         BbsMobPoseScratch saved = poseScratch.acquire();
+        MobRenderContext context = null;
         boolean child = model.child, riding = model.riding;
         float handSwing = model.handSwingProgress;
         int hurt = entity.hurtTime;
@@ -110,8 +109,7 @@ public final class BbsMobSilhouette
             model.getPart().traverse().forEachOrdered(saved::capture);
             // MobFormRenderer supplies default overlay (v=10) in the shadow path.
             entity.hurtTime = 0;
-            MobFormRendererAccessor.irlite$pose(form.pose.get());
-            MobFormRendererAccessor.irlite$overlay(form.poseOverlay.get());
+            context = MobRenderContext.push(rig, form.pose.get(), form.poseOverlay.get());
             // Use the SAME dispatcher as MobFormRenderer, including its vanilla
             // ground-shadow geometry and camera-dependent alpha. Rendering only
             // vanilla.render would omit that silhouette-relevant output.
@@ -133,7 +131,7 @@ public final class BbsMobSilhouette
             {
                 // Also restore after an exception before BBS's TAIL pose cleanup
                 // or inside an optional cleanup accessor.
-                saved.release(BBS_CLEANUP, evaluationFailure);
+                saved.release(context, evaluationFailure);
             }
             finally
             {

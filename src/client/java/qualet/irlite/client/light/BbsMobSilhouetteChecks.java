@@ -3,7 +3,7 @@ package qualet.irlite.client.light;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.forms.MobForm;
-import mchorse.bbs_mod.forms.renderers.MobFormRenderer;
+import mchorse.bbs_mod.forms.renderers.mob.MobRenderContext;
 import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.utils.pose.Transform;
 import net.minecraft.client.MinecraftClient;
@@ -75,7 +75,7 @@ final class BbsMobSilhouetteChecks
         require(baseline.equals(sampler.sample(block, td)), "all fixture state restored");
         ShadowResourceVersions.reloaded();
         require(baseline.resources() != sampler.sample(block, td).resources(), "resource reload");
-        require(MobFormRenderer.getCurrentPose() == null && MobFormRenderer.getCache().isEmpty(), "BBS pose cleanup");
+        require(MobRenderContext.current() == null, "BBS pose cleanup");
         System.out.println("[irlite] caster-revision-checks: PASS 11 (evaluated Villager MobForm, all part fields restored)");
     }
 

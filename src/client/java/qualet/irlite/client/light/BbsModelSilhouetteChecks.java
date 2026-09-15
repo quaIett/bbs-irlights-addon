@@ -151,16 +151,23 @@ final class BbsModelSilhouetteChecks
         }
         finally { form.visible.set(visible); }
 
-        BaseType ik = form.ik.get();
         try
         {
-            MapType probe = new MapType();
-            probe.putBool(PROBE_KEY, true);
-            form.ik.set(probe);
-            require(!sampler.sample(block, td).known(), "unsupported IK config");
+            form.ikTargetOverrides.put(PROBE_KEY, new org.joml.Vector3f());
+            require(!sampler.sample(block, td).known(), "unsupported runtime IK target");
             checks++;
         }
-        finally { form.ik.set(ik); }
+        finally { form.ikTargetOverrides.remove(PROBE_KEY); }
+
+        int layer = form.renderLayer.get();
+        try
+        {
+            form.renderLayer.set(layer == mchorse.bbs_mod.forms.forms.Form.LAYER_CUTOUT
+                ? mchorse.bbs_mod.forms.forms.Form.LAYER_SOLID : mchorse.bbs_mod.forms.forms.Form.LAYER_CUTOUT);
+            require(baseline.material() != sampler.sample(block, td).material(), "render layer");
+            checks++;
+        }
+        finally { form.renderLayer.set(layer); }
 
         require(baseline.equals(sampler.sample(block, td)), "all fixture state restored");
         checks++;

@@ -48,6 +48,8 @@ final class BbsModelPoseScratch
             state.group = group;
             state.current = group.current;
             state.color = group.color;
+            state.overlay = group.overlay;
+            state.poseVisible = group.poseVisible;
             state.lighting = group.lighting;
             state.orient = group.orient;
             // BBS 2.5.2 IK stretch shift; reset() nulls it, so it is restored like orient.
@@ -55,6 +57,8 @@ final class BbsModelPoseScratch
             captured = i + 1;
             group.current = state.isolatedTransform;
             group.color = state.isolatedColor;
+            // BBS 2.6: reset()/applyPose write the pose overlay and pose visibility too.
+            group.overlay = state.isolatedOverlay;
         }
     }
 
@@ -67,12 +71,15 @@ final class BbsModelPoseScratch
             State state = states[--captured];
             state.group.current = state.current;
             state.group.color = state.color;
+            state.group.overlay = state.overlay;
+            state.group.poseVisible = state.poseVisible;
             state.group.lighting = state.lighting;
             state.group.orient = state.orient;
             BbsSilhouetteBridge.setOffset(state.group, state.offset);
             state.group = null;
             state.current = null;
             state.color = null;
+            state.overlay = null;
             state.orient = null;
             state.offset = null;
         }
@@ -83,9 +90,12 @@ final class BbsModelPoseScratch
     {
         final Transform isolatedTransform = new Transform();
         final Color isolatedColor = new Color();
+        final Color isolatedOverlay = new Color();
         ModelGroup group;
         Transform current;
         Color color;
+        Color overlay;
+        boolean poseVisible;
         float lighting;
         Quaternionf orient;
         Vector3f offset;

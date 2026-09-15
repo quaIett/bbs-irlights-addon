@@ -6,11 +6,11 @@ import mchorse.bbs_mod.cubic.ModelInstance;
 import mchorse.bbs_mod.cubic.animation.Animator;
 import mchorse.bbs_mod.cubic.data.model.*;
 import mchorse.bbs_mod.cubic.render.vao.ModelVAO;
-import mchorse.bbs_mod.data.types.BaseType;
-import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.forms.ModelForm;
+import mchorse.bbs_mod.forms.forms.utils.FormBone;
 import mchorse.bbs_mod.forms.renderers.ModelFormRenderer;
+import mchorse.bbs_mod.forms.renderers.utils.FormMaterialLevels;
 import mchorse.bbs_mod.graphics.texture.Texture;
 import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.settings.values.core.ValueTransform;
@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.WeakHashMap;
 
-/** Conservative BBS adapter, audited on 2.3.1-1.20.4 and 2.5.2-1.20.4 (the drifted
+/** Conservative BBS adapter, audited on 2.6-1.20.1 and 2.6-1.20.4 (the drifted
  * members go through {@link BbsSilhouetteBridge}). Evaluates the supported cubic pose
  * before the bake, even when the model is off screen. Runtime animation/IK/physics/
  * constraints, state players, equipment, attachments, look-at, welds, the hybrid
@@ -78,14 +78,11 @@ public final class BbsModelSilhouette
             return unknown("form is not a plain ModelForm");
         if (!shadowlessChildren(form)) return unknown("body parts other than leaf light forms");
         if (!((FormStatePlayersAccessor) form).irlite$statePlayers().isEmpty()) return unknown("animation state players active");
-        if (!empty(form.ik.get()) || !empty(form.physics.get()) || !empty(form.constraints.get()))
-            return unknown("IK/physics/constraints configured");
+        if (configuredBones(form)) return unknown("per-bone IK/physics/constraints configured");
         if (!form.ikTargetOverrides.isEmpty() || !form.poleTargetOverrides.isEmpty()
             || !form.ikTargetWeights.isEmpty() || !form.poleTargetWeights.isEmpty()
-            || !form.ikControlOverrides.isEmpty()
-            || !form.physicsTargetOverrides.isEmpty() || !form.physicsTargetWeights.isEmpty()
-            || !form.physicsControlOverrides.isEmpty() || form.windControlOverride != null)
-            return unknown("runtime IK/physics/wind overrides");
+            || !form.physicsTargetOverrides.isEmpty() || !form.physicsTargetWeights.isEmpty())
+            return unknown("runtime IK/physics target overrides");
 
         if (!(FormUtilsClient.getRenderer(form) instanceof ModelFormRenderer renderer)
             || renderer.getClass() != ModelFormRenderer.class)
@@ -96,6 +93,8 @@ public final class BbsModelSilhouette
         if (instance.getClass() != ModelInstance.class) return unknown("subclassed ModelInstance");
         if (!(instance.model instanceof Model model) || model.getClass() != Model.class)
             return unknown("non-cubic model (BOBJ/other): " + form.model.get());
+        // A .jem model's CEM program drives visibility and pose outside the audited applyPose.
+        if (instance.cemAnimation != null) return unknown("CEM animated model: " + form.model.get());
         if (BbsSilhouetteBridge.procedural(instance)) return unknown("procedural model: " + form.model.get());
         if (!BbsSilhouetteBridge.itemsMain(instance).isEmpty() || !BbsSilhouetteBridge.itemsOff(instance).isEmpty()
             || !BbsSilhouetteBridge.armorSlots(instance).isEmpty())
@@ -133,10 +132,13 @@ public final class BbsModelSilhouette
         {
             saved.capture(groups, groupCount);
             model.resetPose();
+            // BBS 2.6 channels phase: the model config's default pose sits under the form's.
+            model.applyPose(instance.getDefaultPose());
             model.applyPose(renderer.getPose());
             for (ModelGroup group : groups)
             {
-                pose.string(group.id).transform(group.current).color(group.color).word(group.visible ? 1 : 0);
+                pose.string(group.id).transform(group.current).color(group.color).color(group.overlay)
+                    .word(group.visible ? 1 : 0).word(group.poseVisible ? 1 : 0);
                 if (group.orient == null) pose.word(0);
                 else pose.word(1).number(group.orient.x).number(group.orient.y).number(group.orient.z).number(group.orient.w);
                 // 2.5.2 IK stretch shift (render matrix input ahead of the bone's own translate).
@@ -152,7 +154,16 @@ public final class BbsModelSilhouette
 
         Signature material = new Signature().color(form.color.get()).word(form.visible.get() ? 1 : 0)
             .word(form.shaderShadow.get() ? 1 : 0).word(form.additiveColor.get() ? 1 : 0)
-            .word(BbsSilhouetteBridge.culling(instance) ? 1 : 0);
+            .word(BbsSilhouetteBridge.culling(instance) ? 1 : 0).word(form.renderLayer.get());
+        // BBS 2.6 material levels: visibility, face culling and the multiply colour reach every pass.
+        for (String name : new java.util.TreeSet<String>(instance.materials))
+        {
+            material.string(name).word(FormMaterialLevels.materialVisible(form, name) ? 1 : 0)
+                .word(FormMaterialLevels.materialCulling(form, name));
+            Color tint = FormMaterialLevels.materialColor(form, name);
+            if (tint == null) material.word(0);
+            else material.word(1).color(tint);
+        }
         Link modelTexture = BbsSilhouetteBridge.texture(instance);
         Link defaultTexture = form.texture.get() == null ? modelTexture : form.texture.get();
         if (!texture(material, defaultTexture)) return unknown("default texture not loaded/versioned: " + defaultTexture);
@@ -254,7 +265,15 @@ public final class BbsModelSilhouette
     }
 
     private long identity(Object value) { return identities.computeIfAbsent(value, key -> ++nextIdentity); }
-    private static boolean empty(BaseType value) { return value == null || value instanceof MapType map && map.isEmpty(); }
+
+    /** BBS 2.6 keeps IK/physics chains, joint limits and constraints per bone; the runtimes only
+     * compile non-default bones, so an all-default set proves no constraint stage runs. */
+    private static boolean configuredBones(ModelForm form)
+    {
+        for (var value : form.bones.getAll())
+            if (value instanceof FormBone bone && !bone.isDefault()) return true;
+        return false;
+    }
 
     static boolean shadowlessChildren(mchorse.bbs_mod.forms.forms.Form form)
     {

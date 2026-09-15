@@ -1,16 +1,21 @@
 package qualet.irlite.client.forms;
 
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import mchorse.bbs_mod.client.render.picker.BBSPickerRenderer;
 import mchorse.bbs_mod.graphics.Draw;
 import mchorse.bbs_mod.utils.Axis;
 import mchorse.bbs_mod.utils.colors.Color;
+import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.GameRenderer;
+import net.minecraft.client.render.BuiltBuffer;
 import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.util.Identifier;
 import org.joml.Matrix4f;
 
 import java.util.function.Consumer;
@@ -20,6 +25,20 @@ final class LightGuideRenderer
     private static final int CIRCLE_SEGMENTS = 48;
     private static final float WIRE_ALPHA = 0.92F;
     private static final float AXIS_ALPHA = 0.75F;
+
+    /** POSITION_COLOR triangles without depth test for the stencil grab zones — the
+     *  1.21.11 stand-in for the old position-color program under disableDepthTest (the
+     *  GPU rewrite moved depth/blend into the pipeline). Same shape as BBS's gizmo
+     *  pick pipeline; ids ride the vertex colour. */
+    private static final RenderPipeline STENCIL_PIPELINE = RenderPipelines.register(
+        RenderPipeline.builder(RenderPipelines.POSITION_COLOR_SNIPPET)
+            .withLocation(Identifier.of("irlite", "pipeline/guide_stencil_position_color"))
+            .withVertexFormat(VertexFormats.POSITION_COLOR, VertexFormat.DrawMode.TRIANGLES)
+            .withBlend(BlendFunction.TRANSLUCENT)
+            .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+            .withCull(false)
+            .build()
+    );
 
     private LightGuideRenderer()
     {}
@@ -73,25 +92,20 @@ final class LightGuideRenderer
         });
     }
 
+    /** A POSITION_COLOR triangle batch, the format every guide pass builds into. */
+    static BufferBuilder beginTriangles()
+    {
+        return Tessellator.getInstance().begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_COLOR);
+    }
+
     private static void renderTriangles(Consumer<BufferBuilder> consumer)
     {
-        BufferBuilder builder = Tessellator.getInstance().getBuffer();
+        BufferBuilder builder = beginTriangles();
 
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableCull();
-        RenderSystem.depthMask(false);
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
-
-        builder.begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_COLOR);
         consumer.accept(builder);
 
-        BufferRenderer.drawWithGlobalProgram(builder.end());
-
-        RenderSystem.enableDepthTest();
-        RenderSystem.depthMask(true);
-        RenderSystem.enableCull();
+        // Blended, no depth test — the guide reads through the model, as before.
+        Draw.flushTrianglesNoDepth(builder);
     }
 
     private static void coneWire(BufferBuilder builder, MatrixStack stack, float capZ, float radius, float t, Color color, float alpha)
@@ -169,7 +183,7 @@ final class LightGuideRenderer
 
     private static void vertex(BufferBuilder builder, Matrix4f m, float x, float y, float z, float r, float g, float b, float a)
     {
-        builder.vertex(m, x, y, z).color(r, g, b, a).next();
+        builder.vertex(m, x, y, z).color(r, g, b, a);
     }
 
     private static void line(BufferBuilder builder, MatrixStack stack, float x1, float y1, float z1, float x2, float y2, float z2, float t, Color color, float alpha)
@@ -184,11 +198,11 @@ final class LightGuideRenderer
 
     /* ------------------------------------------------------------------ */
     /* Pick handles: fat grab zones drawn into BBS's stencil picking pass. */
-    /* The stencil framebuffer stores IDs as plain vertex COLOR            */
-    /* (r | g<<8 | b<<16, alpha = 1) rendered with the ordinary            */
-    /* position-color program — the exact pattern Gizmo.renderStencil      */
-    /* uses for its own handles. Geometry mirrors the visible wires above  */
-    /* so hover/click zones match the drawn guide pixel-for-pixel.         */
+    /* The stencil target stores IDs as plain vertex COLOR                 */
+    /* (r | g<<8 | b<<16, alpha = 1), drawn via BBSPickerRenderer's colour-*/
+    /* id path — the exact mechanism BBS's gizmo handles use on 1.21.11.   */
+    /* Geometry mirrors the visible wires above so hover/click zones match */
+    /* the drawn guide pixel-for-pixel.                                    */
     /* ------------------------------------------------------------------ */
 
     /** Ring band around the cap circle of the given cone angle — grab zone for radius/inner radius. */
@@ -228,7 +242,7 @@ final class LightGuideRenderer
     }
 
     /** Stencil ID encoded the way StencilFormFramebuffer.pick() decodes it: r | g<<8 | b<<16. */
-    private static Color stencilColor(int index)
+    static Color stencilColor(int index)
     {
         return new Color(
             (index & 0xFF) / 255F,
@@ -237,31 +251,29 @@ final class LightGuideRenderer
         );
     }
 
-    /**
-     * Like {@link #renderTriangles} but without blending (the fragment color IS
-     * the stencil ID) and with depth off so the zones stay grabbable over the
-     * model, mirroring the visible guide which also draws through geometry.
-     * The gizmo's own stencil renders after us and keeps priority on overlap.
-     */
     private static void renderStencilTriangles(Consumer<BufferBuilder> consumer)
     {
-        BufferBuilder builder = Tessellator.getInstance().getBuffer();
+        BufferBuilder builder = beginTriangles();
 
-        RenderSystem.disableBlend();
-        RenderSystem.disableCull();
-        RenderSystem.depthMask(false);
-        RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
-
-        builder.begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_COLOR);
         consumer.accept(builder);
+        flushStencil(builder);
+    }
 
-        BufferRenderer.drawWithGlobalProgram(builder.end());
+    /**
+     * Submit an id-coloured batch into the active picking target. The fragment colour
+     * IS the stencil ID and depth is off, so the zones stay grabbable over the model,
+     * mirroring the visible guide. No-op outside a picking pass (BBSPickerRenderer
+     * refuses to draw ids onto the visible framebuffer). The camera is already folded
+     * into the vertices, so the pass takes the global model-view, as BBS's gizmo does.
+     */
+    static void flushStencil(BufferBuilder builder)
+    {
+        BuiltBuffer built = builder.endNullable();
 
-        RenderSystem.enableDepthTest();
-        RenderSystem.depthMask(true);
-        RenderSystem.enableCull();
-        RenderSystem.enableBlend();
+        if (built != null)
+        {
+            BBSPickerRenderer.drawColorId(STENCIL_PIPELINE, built, RenderSystem.getModelViewMatrix());
+        }
     }
 
     private static float clamp(float value, float min, float max)

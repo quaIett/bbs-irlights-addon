@@ -53,7 +53,7 @@ public class IrliteClient implements ClientModInitializer {
         // irl-core shadow orchestration can reach this mod's per-mod pieces.
         ShadowEngine.install(new IRLiteBbsCasterSource(), IrliteShadowConfig.INSTANCE);
         ResourceManagerHelper.get(ResourceType.CLIENT_RESOURCES).registerReloadListener(new SimpleSynchronousResourceReloadListener() {
-            @Override public Identifier getFabricId() { return new Identifier("irlite", "shadow_silhouettes"); }
+            @Override public Identifier getFabricId() { return Identifier.of("irlite", "shadow_silhouettes"); }
             @Override public void reload(ResourceManager manager) { ShadowResourceVersions.reloaded(); }
         });
 

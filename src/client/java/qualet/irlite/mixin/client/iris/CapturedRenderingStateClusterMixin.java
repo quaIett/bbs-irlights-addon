@@ -2,9 +2,11 @@ package qualet.irlite.mixin.client.iris;
 
 import net.irisshaders.iris.uniforms.CapturedRenderingState;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.joml.Matrix4f;
 import org.qualet.irl.light.FramePipeline;
 
 /**
@@ -26,10 +28,15 @@ import org.qualet.irl.light.FramePipeline;
 @Mixin(value = CapturedRenderingState.class, remap = false)
 public class CapturedRenderingStateClusterMixin
 {
+    /** Iris 1.10.7 hands the matrices out as read-only Matrix4fc; copied into these
+     *  render-thread scratches (allocation-free) for the core, which takes Matrix4f. */
+    @Unique private static final Matrix4f irlite$modelView = new Matrix4f();
+    @Unique private static final Matrix4f irlite$projection = new Matrix4f();
+
     @Inject(method = "setGbufferProjection", at = @At("TAIL"), remap = false)
     private void irlite$captureGbufferMatrices(CallbackInfo ci)
     {
         CapturedRenderingState state = CapturedRenderingState.INSTANCE;
-        FramePipeline.onGbufferMatricesCaptured(state.getGbufferModelView(), state.getGbufferProjection());
+        FramePipeline.onGbufferMatricesCaptured(irlite$modelView.set(state.getGbufferModelView()), irlite$projection.set(state.getGbufferProjection()));
     }
 }

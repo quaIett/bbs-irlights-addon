@@ -1,14 +1,14 @@
 package org.qualet.irl.light.shadow;
 
-import io.netty.util.collection.IntObjectMap;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.blocks.entities.ModelProperties;
-import mchorse.bbs_mod.client.renderer.MorphRenderer;
 import mchorse.bbs_mod.cubic.ModelInstance;
 import mchorse.bbs_mod.film.BaseFilmController;
 import mchorse.bbs_mod.film.Films;
 import mchorse.bbs_mod.film.replays.Replay;
+import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
+import mchorse.bbs_mod.forms.QueueDispatch;
 import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.entities.IEntity;
 import mchorse.bbs_mod.forms.forms.BodyPart;
@@ -33,9 +33,8 @@ import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.OverlayTexture;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.render.entity.EntityRenderDispatcher;
-import net.minecraft.client.render.entity.LivingEntityRenderer;
+import net.minecraft.client.render.entity.EntityRenderManager;
+import net.minecraft.client.render.entity.state.EntityRenderState;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
@@ -51,8 +50,6 @@ import org.joml.Matrix3f;
 import org.joml.Vector3f;
 import qualet.irlite.IrliteConfig;
 import qualet.irlite.client.light.LightCollector;
-import qualet.irlite.client.light.BbsModelSilhouette;
-import qualet.irlite.client.light.BbsMobSilhouette;
 import qualet.irlite.client.light.BbsSilhouetteBridge;
 import qualet.irlite.forms.PointLightForm;
 import qualet.irlite.forms.SpotlightForm;
@@ -70,8 +67,8 @@ import java.util.List;
  *
  * <ul>
  *   <li>ENTITY — world {@link LivingEntity}/{@link ItemEntity}, drawn BBS-morph
- *       first ({@link MorphRenderer#renderPlayer}/{@link MorphRenderer#renderLivingEntity}),
- *       vanilla {@link EntityRenderDispatcher} fallback.</li>
+ *       first (the morph form, as MorphRenderer draws it for Iris shadows),
+ *       vanilla {@link EntityRenderManager} fallback through BBS's command queue.</li>
  *   <li>MODEL_BLOCK — BBS {@link ModelBlockEntity} props, drawn via the BBS
  *       {@link FormRenderer}.</li>
  *   <li>REPLAY — active Film replay stubs (non-actor), drawn via the BBS
@@ -87,27 +84,6 @@ import java.util.List;
  */
 public final class IRLiteBbsCasterSource implements ShadowCasterSource
 {
-    private final BbsModelSilhouette silhouettes = new BbsModelSilhouette();
-    private final BbsMobSilhouette mobSilhouettes = new BbsMobSilhouette();
-
-    @Override
-    public CasterRevision revision(Object caster, int type, float tickDelta)
-    {
-        if (type != CasterType.MODEL_BLOCK || !(caster instanceof ModelBlockEntity block)) return CasterRevision.UNKNOWN;
-        try
-        {
-            return block.getProperties() != null && block.getProperties().getForm() instanceof mchorse.bbs_mod.forms.forms.MobForm
-                ? mobSilhouettes.sample(block, tickDelta) : silhouettes.sample(block, tickDelta);
-        }
-        catch (RuntimeException | LinkageError failure)
-        {
-            // INVARIANT 4 scoping: a probe failure (BBS drift past the audited layouts)
-            // degrades to UNKNOWN for that caster. Reported once so it never hides as
-            // "no reuse"; the self-test's AssertionError deliberately propagates.
-            BbsSilhouetteBridge.reportFailure(failure);
-            return CasterRevision.UNKNOWN;
-        }
-    }
     /** Match the light collector's camera horizon. This removes the old 72-block
      *  mismatch for co-located lamp/caster scenes; the global bounded pool remains
      *  intentionally camera-prioritized for casters beyond this horizon. */
@@ -132,7 +108,7 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     @Override
     public void collect(ClientWorld world, Vec3d camPos, float tickDelta, OccluderSink sink)
     {
-        silhouettes.beginFrame();
+        captures.clear();
         double camX = camPos.x, camY = camPos.y, camZ = camPos.z;
 
         // --- Arm 1: world entities (vanilla / BBS-morph render path) ---
@@ -255,7 +231,7 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
             emitModelBlock(sink, mbe, form, t);
             collected++;
         }
-        if (BbsModelSilhouette.DEBUG && collected != lastModelBlocks)
+        if (DEBUG_COLLECT && collected != lastModelBlocks)
         {
             // -Dirlite.debugCasterRevisions: a caster that stops being collected
             // is invisible to the per-caster UNKNOWN trace, so report set changes.
@@ -265,6 +241,7 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     }
 
     private static int lastModelBlocks = -1;
+    private static final boolean DEBUG_COLLECT = Boolean.getBoolean("irlite.debugCasterRevisions");
 
     private static void collectFilmReplays(double camX, double camY, double camZ, float tickDelta, OccluderSink sink)
     {
@@ -301,20 +278,17 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
                 continue;
             }
 
-            for (IntObjectMap.PrimitiveEntry<IEntity> e : ctrl.getEntities().entries())
+            // BBS 2.6 keys the film's entities by the replay's stable id, not its list index.
+            java.util.Map<String, IEntity> entities = ctrl.getEntities();
+            for (int rid = 0; rid < replays.size(); rid++)
             {
-                int rid = e.key();
-                if (rid < 0 || rid >= replays.size())
-                {
-                    continue;
-                }
                 Replay replay = replays.get(rid);
                 if (replay == null || replay.actor.get())
                 {
                     // Skip actor replays — real actors come via the entity arm.
                     continue;
                 }
-                IEntity ent = e.value();
+                IEntity ent = entities.get(replay.getId());
                 if (ent == null)
                 {
                     continue;
@@ -756,6 +730,31 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
         }
     }
 
+    /** The IEntity a morphed world entity renders its form WITH (the player morph's or
+     *  selector owner's form entity), or null for a plain vanilla entity. Pure reads, as
+     *  {@link #entityMorphForm}; INVARIANT 4: throws degrade to null. */
+    private static IEntity entityMorphHost(Entity entity)
+    {
+        try
+        {
+            if (entity instanceof AbstractClientPlayerEntity player)
+            {
+                Morph morph = Morph.getMorph(player);
+                return morph == null ? null : morph.entity;
+            }
+            if (entity instanceof ISelectorOwnerProvider provider)
+            {
+                SelectorOwner owner = provider.getOwner();
+                return owner == null ? null : owner.entity;
+            }
+            return null;
+        }
+        catch (Throwable t)
+        {
+            return null;
+        }
+    }
+
     /** Static-occluder signature for a model block: which form it shows plus its
      *  baked center plus the scale + rotation the center alone doesn't capture.
      *  Per-caster CONTENT ONLY — the order-independent cross-caster fold lives in
@@ -786,72 +785,131 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
     }
 
     // ===================================================================== //
-    //  emitOccluder — HOW to draw ONE shortlisted caster. The shared wrapper  //
-    //  owns the null/inPass guard, depth pins, the setBaking gate, the once-   //
-    //  per-pass flush, INVARIANT 1 matrix re-establish, and the INVARIANT 4    //
-    //  try/catch + terminateRun. We ONLY append geometry; we NEVER catch our   //
-    //  own throw, flush, or repair matrices.                                  //
+    //  emitOccluder — HOW to draw ONE shortlisted caster. MC 1.21.11: irl-core //
+    //  rasterizes casters from POSITION triangles (RawOccluderBatch), so each  //
+    //  caster is drawn through the BBS immediate pipeline under a capture      //
+    //  session (BbsOccluderCapture) on an anchor-relative stack. The shared    //
+    //  wrapper owns the setBaking gate, the once-per-pass flush and the        //
+    //  INVARIANT 4 try/catch + rewind; we NEVER catch our own throw.           //
     // ===================================================================== //
+
+    /**
+     * Per-bake capture cache keyed by caster identity. The orchestration calls
+     * emitOccluder up to six times per caster per bake (point faces + every spot
+     * pass it is shortlisted for), and a capture re-renders the whole form, so it
+     * runs once per caster per bake. Each entry remembers the pass anchor
+     * {@code A0 = ShadowRenderer.currentOrigin*} it was captured against; another
+     * light's pass re-bases the triangles by the exact integer delta
+     * {@code A0 - A_pass} (anchors are rounded light positions). Cleared in collect.
+     */
+    private final Reference2ObjectOpenHashMap<Object, Captured> captures = new Reference2ObjectOpenHashMap<>();
+
+    /** Re-base scratch, grown to the largest caster, reused single-threaded. */
+    private float[] rebase = new float[0];
+
+    private record Captured(float[] tris, double ax, double ay, double az)
+    {}
 
     @Override
     public void emitOccluder(Object caster, int type, float tickDelta, OccluderBatch batch)
     {
-        ImmediateOccluderBatch b = (ImmediateOccluderBatch) batch;
-        Camera cam = MinecraftClient.getInstance().gameRenderer.getCamera();
-        switch (type)
-        {
-            case CasterType.MODEL_BLOCK ->
-                drawModelBlock((ModelBlockEntity) caster, b.matrices(), b.immediate(), cam, tickDelta);
-            case CasterType.REPLAY ->
-                drawReplay((IEntity) caster, b.matrices(), cam, tickDelta);
-            default /* ENTITY */ ->
-                drawEntity((Entity) caster, b.matrices(), b.immediate(), tickDelta);
-        }
-    }
+        RawOccluderBatch raw = (RawOccluderBatch) batch;
+        double pax = ShadowRenderer.currentOriginX();
+        double pay = ShadowRenderer.currentOriginY();
+        double paz = ShadowRenderer.currentOriginZ();
 
-    private static void drawEntity(Entity entity, MatrixStack matrices, VertexConsumerProvider.Immediate immediate, float tickDelta)
-    {
-        // Light-relative bake: emit geometry relative to the pass anchor (= the
-        // light view's origin, ShadowRenderer.currentOrigin*). Subtract in double
-        // BEFORE the float cast inside matrices.translate / dispatcher.render so
-        // the offsets stay sub-block-magnitude far from the world origin.
-        double ox = ShadowRenderer.currentOriginX();
-        double oy = ShadowRenderer.currentOriginY();
-        double oz = ShadowRenderer.currentOriginZ();
-        double cx = MathHelper.lerp(tickDelta, entity.lastRenderX, entity.getX()) - ox;
-        double cy = MathHelper.lerp(tickDelta, entity.lastRenderY, entity.getY()) - oy;
-        double cz = MathHelper.lerp(tickDelta, entity.lastRenderZ, entity.getZ()) - oz;
-        float yaw = entity.getYaw(tickDelta);
-
-        // BBS morph first so morphed players/actors bake their visible
-        // silhouette; vanilla dispatcher is the fallback.
-        boolean rendered = false;
-        if (entity instanceof AbstractClientPlayerEntity player)
+        Captured cached = captures.get(caster);
+        if (cached == null)
         {
-            matrices.push();
-            matrices.translate(cx, cy, cz);
-            rendered = MorphRenderer.renderPlayer(player, yaw, tickDelta, matrices, immediate, FULL_LIGHT);
-            matrices.pop();
-        }
-        if (!rendered && entity instanceof LivingEntity living)
-        {
-            int overlay = LivingEntityRenderer.getOverlay(living, 0f);
-            matrices.push();
-            matrices.translate(cx, cy, cz);
-            rendered = MorphRenderer.renderLivingEntity(living, yaw, tickDelta, matrices, immediate, FULL_LIGHT, overlay);
-            matrices.pop();
-        }
-        if (!rendered)
-        {
-            EntityRenderDispatcher dispatcher = MinecraftClient.getInstance().getEntityRenderDispatcher();
-            if (dispatcher != null)
+            Camera cam = MinecraftClient.getInstance().gameRenderer.getCamera();
+            float[] tris = BbsOccluderCapture.capture(() ->
             {
-                dispatcher.render(entity, cx, cy, cz, yaw, tickDelta, matrices, immediate, FULL_LIGHT);
-            }
+                switch (type)
+                {
+                    case CasterType.MODEL_BLOCK -> drawModelBlock((ModelBlockEntity) caster, pax, pay, paz, cam, tickDelta);
+                    case CasterType.REPLAY -> drawReplay((IEntity) caster, pax, pay, paz, cam, tickDelta);
+                    default /* ENTITY */ -> drawEntity((Entity) caster, pax, pay, paz, cam, tickDelta);
+                }
+            });
+            cached = new Captured(tris, pax, pay, paz);
+            captures.put(caster, cached);
         }
+
+        float[] src = cached.tris();
+        int n = src.length;
+        if (n == 0)
+        {
+            return;
+        }
+        if (pax == cached.ax() && pay == cached.ay() && paz == cached.az())
+        {
+            // Same anchor (a point light's six faces, or a same-cell light): zero-copy.
+            raw.append(src);
+            return;
+        }
+
+        float dx = (float) (cached.ax() - pax);
+        float dy = (float) (cached.ay() - pay);
+        float dz = (float) (cached.az() - paz);
+        if (rebase.length < n)
+        {
+            rebase = new float[n];
+        }
+        float[] dst = rebase;
+        for (int i = 0; i + 3 <= n; i += 3)
+        {
+            dst[i] = src[i] + dx;
+            dst[i + 1] = src[i + 1] + dy;
+            dst[i + 2] = src[i + 2] + dz;
+        }
+        raw.append(dst, 0, n);
     }
 
-    private static void drawModelBlock(ModelBlockEntity mbe, MatrixStack matrices, VertexConsumerProvider.Immediate immediate, Camera camera, float tickDelta)
+    private static void drawEntity(Entity entity, double ox, double oy, double oz, Camera camera, float tickDelta)
+    {
+        MatrixStack matrices = new MatrixStack();
+
+        // BBS morph first so morphed players/actors bake their visible silhouette —
+        // the same draw MorphRenderer.renderShadow issues for Iris's own shadow pass
+        // (feet translate + body yaw, then the form). Rendering it here directly also
+        // keeps the vanilla path below from queueing the morph into BBS's main-pass queue.
+        IEntity host = entityMorphHost(entity);
+        Form morph = host == null ? null : entityMorphForm(entity);
+        if (morph != null)
+        {
+            double cx = MathHelper.lerp(tickDelta, entity.lastRenderX, entity.getX()) - ox;
+            double cy = MathHelper.lerp(tickDelta, entity.lastRenderY, entity.getY()) - oy;
+            double cz = MathHelper.lerp(tickDelta, entity.lastRenderZ, entity.getZ()) - oz;
+            float bodyYaw = MathHelper.lerp(tickDelta, host.getPrevBodyYaw(), host.getBodyYaw());
+
+            matrices.translate(cx, cy, cz);
+            matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-bodyYaw));
+            FormUtilsClient.render(morph, new FormRenderingContext()
+                .set(FormRenderType.ENTITY, host, matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
+                .camera(camera));
+            return;
+        }
+
+        // Vanilla entity: 1.21.9+ renderers only submit commands, so render through
+        // BBS's private command queue and flush it into the BBS provider — the path
+        // MobFormRenderer uses — which ends at RenderLayer#draw and lands in the capture.
+        // World decorations (labels, blob shadows, leashes, outlines) never cast.
+        EntityRenderManager manager = MinecraftClient.getInstance().getEntityRenderDispatcher();
+        EntityRenderState state = manager.getAndUpdateRenderState(entity, tickDelta);
+        state.light = FULL_LIGHT;
+        state.displayName = null;
+        state.nameLabelPos = null;
+        state.shadowPieces.clear();
+        state.leashDatas = null;
+        state.outlineColor = 0;
+
+        // Light-relative bake: anchor-relative offset, subtracted in double.
+        manager.render(state, QueueDispatch.cameraState(), state.x - ox, state.y - oy, state.z - oz, matrices, QueueDispatch.queue());
+        QueueDispatch.flush();
+        FormUtilsClient.getProvider().draw();
+    }
+
+    private static void drawModelBlock(ModelBlockEntity mbe, double ox, double oy, double oz, Camera camera, float tickDelta)
     {
         if (mbe.getProperties() == null)
         {
@@ -867,22 +925,11 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
         // Feet = block center at pos.getY() (no +0.5 in Y); t.translate is NOT
         // folded in — applyTransform below applies it ONCE, exactly like the
         // BBS render (ModelBlockEntityRenderer: translate(0.5,0,0.5) then
-        // applyTransform). The old code folded translate into the feet AND let
-        // applyTransform add it again, displacing every baked silhouette by one
-        // translate vector from the visible model (review 2026-08-10; the
-        // sphere pivot in emitModelBlock moved to 1× in the same commit — the
-        // two halves must always agree or the cull starts blinking). Light-
-        // relative bake: subtract the pass anchor (= the light view origin) in
-        // double before matrices.translate's float cast.
-        double ox = ShadowRenderer.currentOriginX();
-        double oy = ShadowRenderer.currentOriginY();
-        double oz = ShadowRenderer.currentOriginZ();
-        double feetX = mbe.getPos().getX() + 0.5 - ox;
-        double feetY = mbe.getPos().getY() - oy;
-        double feetZ = mbe.getPos().getZ() + 0.5 - oz;
-
-        matrices.push();
-        matrices.translate(feetX, feetY, feetZ);
+        // applyTransform). emitModelBlock's sphere pivot uses the same 1×
+        // translate — keep the two in lockstep. Light-relative bake: subtract
+        // the pass anchor in double before the float cast.
+        MatrixStack matrices = new MatrixStack();
+        matrices.translate(mbe.getPos().getX() + 0.5 - ox, mbe.getPos().getY() - oy, mbe.getPos().getZ() + 0.5 - oz);
         if (t != null)
         {
             MatrixStackUtils.applyTransform(matrices, t);
@@ -894,10 +941,9 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
                 .set(FormRenderType.MODEL_BLOCK, mbe.getEntity(), matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
                 .camera(camera));
         }
-        matrices.pop();
     }
 
-    private static void drawReplay(IEntity stub, MatrixStack matrices, Camera camera, float tickDelta)
+    private static void drawReplay(IEntity stub, double ox, double oy, double oz, Camera camera, float tickDelta)
     {
         Form form = stub.getForm();
         if (form == null)
@@ -905,18 +951,14 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
             return;
         }
 
-        // Light-relative bake: subtract the pass anchor (= the light view origin)
-        // in double before matrices.translate's float cast. The Y-rotation below
-        // is unaffected (it is about the anchor-relative feet, orientation-only).
-        double ox = ShadowRenderer.currentOriginX();
-        double oy = ShadowRenderer.currentOriginY();
-        double oz = ShadowRenderer.currentOriginZ();
+        // Light-relative bake: subtract the pass anchor in double before the
+        // float cast. The Y-rotation is about the anchor-relative feet.
         double fx = MathHelper.lerp(tickDelta, stub.getPrevX(), stub.getX()) - ox;
         double fy = MathHelper.lerp(tickDelta, stub.getPrevY(), stub.getY()) - oy;
         double fz = MathHelper.lerp(tickDelta, stub.getPrevZ(), stub.getZ()) - oz;
         float bodyYaw = MathHelper.lerp(tickDelta, stub.getPrevBodyYaw(), stub.getBodyYaw());
 
-        matrices.push();
+        MatrixStack matrices = new MatrixStack();
         matrices.translate(fx, fy, fz);
         matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-bodyYaw));
         FormRenderer<?> renderer = FormUtilsClient.getRenderer(form);
@@ -926,6 +968,5 @@ public final class IRLiteBbsCasterSource implements ShadowCasterSource
                 .set(FormRenderType.ENTITY, stub, matrices, FULL_LIGHT, OverlayTexture.DEFAULT_UV, tickDelta)
                 .camera(camera));
         }
-        matrices.pop();
     }
 }

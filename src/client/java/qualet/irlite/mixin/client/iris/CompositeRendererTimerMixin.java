@@ -2,7 +2,6 @@ package qualet.irlite.mixin.client.iris;
 
 import com.google.common.collect.ImmutableSet;
 import net.irisshaders.iris.gl.program.Program;
-import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
 import net.irisshaders.iris.pipeline.CompositeRenderer;
 import net.irisshaders.iris.shaderpack.programs.ProgramSource;
 import org.spongepowered.asm.mixin.Mixin;
@@ -24,13 +23,10 @@ import java.util.function.Supplier;
  * <p>The Pass object carries no name at renderAll time, so the name is captured
  * at pipeline construction: createProgram RETURN pairs source.getName() with
  * the built Program, and the renderAll brackets look it up by Program identity.
- * The bracket spans program.use() .. renderQuad() — the pass's compute
- * dispatches and mipmap regeneration (both before use()) are excluded by
- * design; ComputeOnlyPass never reaches use(), so brackets always pair.
  * Everything no-ops when the profiler flag is off.</p>
  *
- * <p>require = 0 on the redirects: these are the addon's only instruction-level
- * anchors into an Iris method body — if a future Iris reshapes renderAll they
+ * <p>require = 0 on the redirect: it is the addon's only instruction-level
+ * anchor into an Iris method body — if a future Iris reshapes renderAll it
  * must degrade to an inert profiler, not a mixin-apply crash in normal play
  * (the begin/end guards tolerate unpaired brackets).</p>
  */
@@ -54,18 +50,12 @@ public class CompositeRendererTimerMixin
               remap = false)
     private void irlite$beginTimedPass(Program program)
     {
+        // Iris 1.10.7 (MC 1.21.11) removed FullScreenQuadRenderer.renderQuad() — the quad
+        // draws through a GpuBuffer — so there is no per-pass END anchor. Bracket each pass
+        // from its program.use() to the NEXT pass's use(); the frame's trailing pass is
+        // closed by the bake bracket's VlProfiler.frameTick() next frame.
+        VlProfiler.endPass();
         VlProfiler.beginPass(VlProfiler.irisPassName(program));
         program.use();
-    }
-
-    @Redirect(method = "renderAll",
-              at = @At(value = "INVOKE",
-                       target = "Lnet/irisshaders/iris/pathways/FullScreenQuadRenderer;renderQuad()V"),
-              require = 0, expect = 1,
-              remap = false)
-    private void irlite$endTimedPass(FullScreenQuadRenderer instance)
-    {
-        instance.renderQuad();
-        VlProfiler.endPass();
     }
 }

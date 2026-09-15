@@ -1,5 +1,6 @@
 package qualet.irlite.client.forms;
 
+import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.camera.Camera;
 import mchorse.bbs_mod.camera.CameraUtils;
@@ -174,7 +175,9 @@ public final class SpotGuideDrag
         };
 
         String key = FormUtils.getPropertyPath(property);
-        KeyframeChannel channel = key == null ? null : replay.properties.properties.get(key);
+        // BBS 2.6 addresses tracks by TrackId; this is FormProperties' own lookup.
+        TrackId track = key == null ? null : TrackId.parse(key);
+        KeyframeChannel channel = track == null ? null : replay.properties.get(track);
 
         if (channel == null || channel.isEmpty())
         {

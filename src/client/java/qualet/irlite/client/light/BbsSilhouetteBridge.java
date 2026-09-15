@@ -90,8 +90,8 @@ public final class BbsSilhouetteBridge
             && OFFSET != null && OFFSET_SETTER != null && WELD_BINDINGS != null;
         String layout = switch (BBS_VERSION)
         {
-            case "2.3.1-1.20.4" -> legacyLayout ? null : "2.3.1 layout (Transform.rotate2, no ModelGroup.offset/welds)";
-            case "2.5.2-1.20.4" -> modernLayout ? null : "2.5.2 layout (Transform.rotationMode/quat, ModelGroup.offset, ModelInstance.getWeldBindings)";
+            // This build targets the BBS 2.6 addon API; older releases cannot load it at all.
+            case "2.6-1.20.1", "2.6-1.20.4" -> modernLayout ? null : "2.6 layout (Transform.rotationMode/quat, ModelGroup.offset, ModelInstance.getWeldBindings)";
             default -> "unaudited BBS version";
         };
         if (layout != null) missing.add(layout);

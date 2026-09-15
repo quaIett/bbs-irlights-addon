@@ -1,10 +1,9 @@
 package qualet.irlite.client.forms;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.client.BBSRendering;
 import mchorse.bbs_mod.client.BBSShaders;
-import mchorse.bbs_mod.forms.CustomVertexConsumerProvider;
 import mchorse.bbs_mod.forms.forms.BodyPart;
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.renderers.FormRenderer;
@@ -17,10 +16,9 @@ import mchorse.bbs_mod.ui.utils.icons.Icon;
 import mchorse.bbs_mod.utils.colors.Color;
 import mchorse.bbs_mod.utils.colors.Colors;
 import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.GameRenderer;
+import net.minecraft.client.render.BuiltBuffer;
+import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import org.joml.Matrix4f;
 import qualet.irlite.IrliteConfig;
@@ -49,7 +47,8 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
         boolean editorPreview = context.type == FormRenderType.PREVIEW || context.modelRenderer || context.ui;
 
         // Skip entirely while baking shadows — a light form inside a caster's
-        // form-tree would otherwise re-register every face/tile pass.
+        // form-tree would otherwise re-register every face/tile pass (and, on
+        // 1.21.11, its guide would land in the captured occluder geometry).
         if (ShadowBakeState.isBaking())
         {
             return;
@@ -149,18 +148,27 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
     {}
 
     /**
-     * Draw the light's morph-list icon as a flat, camera-facing quad in the
-     * inventory item slot. The model-block item model is {@code builtin/entity}
-     * with no display transform, so the GUI view is straight-on (no isometric
-     * tilt) and a quad on the block's local XY plane reads face-on. Uses BBS's
-     * own icons atlas (a raw GL texture, not a vanilla Identifier), so we bind
-     * it directly and draw with the vanilla position_tex_color program.
+     * Draw the light's morph-list icon as a flat quad in the inventory item slot.
+     * The model-block item model has no display transform, so the GUI view is
+     * straight-on and a quad on the block's local XY plane reads face-on. 1.21.11:
+     * item forms are recorded through BBS's FormRenderCapture and replayed later, so
+     * the quad goes through BBS's billboard layer — resolved right after binding the
+     * icons atlas, the layer carries that texture in its own Sampler0 — instead of the
+     * removed global position_tex_color program. Both faces are emitted so the pick
+     * of winding/culling can't hide it.
      */
     private void renderItemIcon(FormRenderingContext context)
     {
         Icon icon = this.icon();
 
         if (icon == null || icon.texture == null)
+        {
+            return;
+        }
+
+        Texture texture = BBSModClient.getTextures().getTexture(icon.texture);
+
+        if (texture == null)
         {
             return;
         }
@@ -191,31 +199,33 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
 
         Matrix4f matrix = context.stack.peek().getPositionMatrix();
 
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.enableDepthTest();
-        RenderSystem.disableCull();
-        RenderSystem.setShaderColor(1F, 1F, 1F, 1F);
+        BBSModClient.getTextures().bindTexture(texture);
+        RenderLayer layer = BBSShaders.getBoundBillboardLayer();
 
-        /* icons.png is loaded by BBS as a bare GL texture; bind its id to unit 0. */
-        BBSModClient.getTextures().bindTexture(icon.texture);
-        RenderSystem.setShader(GameRenderer::getPositionTexColorProgram);
-
-        BufferBuilder builder = Tessellator.getInstance().getBuffer();
-        builder.begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_TEXTURE_COLOR);
+        BufferBuilder builder = Tessellator.getInstance().begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_TEXTURE_COLOR);
 
         /* Alpha forced to 1 — a light with a translucent colour must still show
-         * a solid icon rather than a faint/invisible one. */
-        builder.vertex(matrix, x1, y1, z).texture(u1, v2).color(c.r, c.g, c.b, 1F).next();
-        builder.vertex(matrix, x2, y1, z).texture(u2, v2).color(c.r, c.g, c.b, 1F).next();
-        builder.vertex(matrix, x2, y2, z).texture(u2, v1).color(c.r, c.g, c.b, 1F).next();
-        builder.vertex(matrix, x1, y1, z).texture(u1, v2).color(c.r, c.g, c.b, 1F).next();
-        builder.vertex(matrix, x2, y2, z).texture(u2, v1).color(c.r, c.g, c.b, 1F).next();
-        builder.vertex(matrix, x1, y2, z).texture(u1, v1).color(c.r, c.g, c.b, 1F).next();
+         * a solid icon rather than a faint/invisible one. Front, then back. */
+        builder.vertex(matrix, x1, y1, z).texture(u1, v2).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x2, y1, z).texture(u2, v2).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x2, y2, z).texture(u2, v1).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x1, y1, z).texture(u1, v2).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x2, y2, z).texture(u2, v1).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x1, y2, z).texture(u1, v1).color(c.r, c.g, c.b, 1F);
 
-        BufferRenderer.drawWithGlobalProgram(builder.end());
+        builder.vertex(matrix, x2, y2, z).texture(u2, v1).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x2, y1, z).texture(u2, v2).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x1, y1, z).texture(u1, v2).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x1, y2, z).texture(u1, v1).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x2, y2, z).texture(u2, v1).color(c.r, c.g, c.b, 1F);
+        builder.vertex(matrix, x1, y1, z).texture(u1, v2).color(c.r, c.g, c.b, 1F);
 
-        RenderSystem.enableCull();
+        BuiltBuffer built = builder.endNullable();
+
+        if (built != null)
+        {
+            layer.draw(built);
+        }
 
         context.stack.pop();
     }
@@ -228,23 +238,22 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
         return c;
     }
 
+    /**
+     * The whole-form pick zone: a small wire box in this form's picking id. 1.21.11
+     * has no global picker program to hijack the box's draw into, so the id rides the
+     * vertex colour through the same colour-id pass as the guide handles.
+     */
     private void renderPickBox(FormRenderingContext context)
     {
-        Color c = this.tintedColor(context);
+        Color id = LightGuideRenderer.stencilColor(context.getPickingIndex());
 
         context.stack.push();
         context.stack.translate(-0.25, 0, -0.25);
 
-        CustomVertexConsumerProvider.hijackVertexFormat((layer) ->
-        {
-            this.setupTarget(context, BBSShaders.getPickerModelsProgram());
-            RenderSystem.setShader(BBSShaders::getPickerModelsProgram);
-        });
+        BufferBuilder builder = LightGuideRenderer.beginTriangles();
 
-        Draw.renderBox(context.stack, 0, 0, 0, 0.5, 0.5, 0.5, c.r, c.g, c.b);
-
-        CustomVertexConsumerProvider.clearRunnables();
-        RenderSystem.enableDepthTest();
+        Draw.renderBox(builder, context.stack, 0, 0, 0, 0.5, 0.5, 0.5, id.r, id.g, id.b, 1F);
+        LightGuideRenderer.flushStencil(builder);
 
         context.stack.pop();
     }

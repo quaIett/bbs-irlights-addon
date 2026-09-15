@@ -1,7 +1,7 @@
 package qualet.irlite.mixin.client;
 
 import net.minecraft.client.render.GameRenderer;
-import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.render.RenderTickCounter;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -15,8 +15,13 @@ import qualet.irlite.client.light.LightCollector;
 public class GameRendererLightMixin
 {
     @Inject(method = "renderWorld", at = @At("HEAD"))
-    private void irlite$collectLights(float tickDelta, long limitTime, MatrixStack matrices, CallbackInfo ci)
+    private void irlite$collectLights(RenderTickCounter tickCounter, CallbackInfo ci)
     {
+        // 1.21.11: renderWorld(RenderTickCounter) — the old (tickDelta, limitTime,
+        // MatrixStack) parameters are gone, so derive the partial tick here
+        // (ignoreFreeze=true matches the previous always-advancing behaviour).
+        float tickDelta = tickCounter.getTickProgress(true);
+
         // Dev VL profiler (-Dirlite.profileVl=true): the shadow bake below runs
         // strictly before the Iris pass sequence, so its GL_TIME_ELAPSED bracket
         // never nests with the per-pass brackets. collect/prioritize inside
@@ -46,18 +51,22 @@ public class GameRendererLightMixin
     }
 
     /**
-     * Deferred SSBO upload, injected just AFTER this frame's Camera.update (offset ~180
-     * in renderWorld, still well before WorldRenderer.render / Iris activation at ~562):
-     * the origin the light SSBO is made relative to must be the post-update, current-frame
-     * eye that the shaderpack reconstructs fragments against, not the stale HEAD camera.
+     * Deferred SSBO upload — the light buffer is made relative to the current-frame eye
+     * that the shaderpack reconstructs fragments against, not a stale camera.
+     *
+     * <p>1.21.11 moved the camera update out of renderWorld: {@code render} calls
+     * {@code updateCamera(RenderTickCounter)} BEFORE {@code renderWorld}, so the camera is
+     * already this frame's at HEAD. The upload still lands strictly after the HEAD collect —
+     * right after {@code updateCameraState(F)} — and well before WorldRenderer.render / Iris
+     * activation (same anchor as the redactor's port/1.21.11).</p>
      */
     @Inject(method = "renderWorld",
             at = @At(value = "INVOKE",
-                     target = "Lnet/minecraft/client/render/Camera;update(Lnet/minecraft/world/BlockView;Lnet/minecraft/entity/Entity;ZZF)V",
+                     target = "Lnet/minecraft/client/render/GameRenderer;updateCameraState(F)V",
                      shift = At.Shift.AFTER,
                      ordinal = 0),
             require = 1)
-    private void irlite$uploadLights(float tickDelta, long limitTime, MatrixStack matrices, CallbackInfo ci)
+    private void irlite$uploadLights(RenderTickCounter tickCounter, CallbackInfo ci)
     {
         long uploadT0 = System.nanoTime();
         FramePipeline.uploadIfPending();

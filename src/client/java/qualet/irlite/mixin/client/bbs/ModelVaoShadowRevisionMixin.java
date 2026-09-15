@@ -14,7 +14,7 @@ public class ModelVaoShadowRevisionMixin implements ShadowResourceRevision
 {
     @Unique private long irlite$revision;
 
-    @Inject(method = {"upload", "delete"}, at = @At("HEAD"), require = 0)
+    @Inject(method = "delete", at = @At("HEAD"), require = 0)
     private void irlite$changed(CallbackInfo ci) { irlite$revision = ShadowResourceVersions.next(); }
 
     @Override public long irlite$shadowRevision() { return irlite$revision; }

@@ -62,7 +62,7 @@ public final class ProfileCapture
         metadata.put("detailedShadowTimers", detailed);
         metadata.put("vlSweep", sweep);
         metadata.put("world", mc.world == null ? null : mc.world.getRegistryKey().getValue().toString());
-        metadata.put("camera", mc.gameRenderer.getCamera().getPos().toString());
+        metadata.put("camera", mc.gameRenderer.getCamera().getCameraPos().toString());
         metadata.put("cameraYaw", mc.gameRenderer.getCamera().getYaw());
         metadata.put("cameraPitch", mc.gameRenderer.getCamera().getPitch());
         String json = new GsonBuilder().serializeNulls().create().toJson(metadata);

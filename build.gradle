@@ -3,36 +3,18 @@ plugins {
     id 'maven-publish'
 }
 
-// --- Multi-version dev profile selector (-Pmc=1.20.1 | 1.20.4) ---
-// Picks Minecraft / yarn / Fabric API / BBS jar / Iris / Sodium coordinates for
-// the target version. The PRODUCT jar is built against 1.20.1 (lower version =
-// most stable intermediary names "upward"); 1.20.4 is used to dev-test the
-// 1.20.4 path. The compiled jar is universal across the depends range either way.
-def mcTarget = (project.findProperty('mc') ?: '1.20.1').toString()
-def mcVersions = [
-    '1.20.1': [
-        minecraft: '1.20.1',
-        yarn     : '1.20.1+build.10',
-        fabricApi: '0.92.9+1.20.1',
-        bbsJar   : 'libs/bbs-2.3.1-1.20.1.jar',
-        sodium   : 'mc1.20.1-0.5.11',
-        iris     : '1.7.2+1.20.1',
-        lwjglPin : '3.3.1',
-    ],
-    '1.20.4': [
-        minecraft: '1.20.4',
-        yarn     : '1.20.4+build.1',
-        fabricApi: '0.91.1+1.20.4',
-        bbsJar   : 'libs/bbs-2.3.1-1.20.4.jar',
-        sodium   : 'mc1.20.4-0.5.8',
-        iris     : '1.7.2+1.20.4',
-        lwjglPin : null,
-    ],
+// --- Branch port/1.21.11: BBS 2.6 on MC 1.21.11 (Java 21) ---
+// The 1.20.x targets live on master (-Pmc selector) and 1.21.1 on port/1.21.1. MC 1.21.11
+// sits after the 1.21.5 RenderPipeline and 1.21.9 EntityRenderState rewrites, so shadow
+// casters hand irl-core's raw-GL batch captured triangles instead of drawing into an Immediate.
+def V = [
+    minecraft: '1.21.11',
+    yarn     : '1.21.11+build.6',
+    fabricApi: '0.141.4+1.21.11',
+    bbsJar   : 'libs/bbs-2.6-1.21.11.jar',
+    sodium   : 'mc1.21.11-0.8.7-fabric',
+    iris     : '1.10.7+1.21.11-fabric',
 ]
-if (!mcVersions.containsKey(mcTarget)) {
-    throw new GradleException("Unknown -Pmc=${mcTarget}; expected 1.20.1 or 1.20.4")
-}
-def V = mcVersions[mcTarget]
 logger.lifecycle("IRLite build target: Minecraft ${V.minecraft} (yarn ${V.yarn})")
 
 version = "${project.mod_version}+mc${V.minecraft}"
@@ -57,7 +39,11 @@ loom {
             // Dev conveniences for automated runtime checks:
             //   -Pquickplay="World name"  auto-joins that singleplayer save,
             //   -PclientJvmArgs="-Dirlite.profileVl=true"  forwards JVM flags
-            // (e.g. the VL/shadow profilers) into the forked client.
+            // (e.g. the VL/shadow profilers) into the forked client,
+            //   -PrunDir=runs/1.21.11  keeps a per-version game dir apart from run/.
+            if (project.hasProperty('runDir')) {
+                runDir project.property('runDir').toString()
+            }
             if (project.hasProperty('quickplay')) {
                 programArgs '--quickPlaySingleplayer', project.property('quickplay').toString()
             }
@@ -90,26 +76,12 @@ repositories {
     // glsl-transformer (io.github.douira), an Iris runtime dependency.
     maven { url = "https://maven.gegy.dev/" }
     // irl-core (shared engine) is published here by `gradlew publishToMavenLocal`
-    // in ../irl-core — must be resolvable before this mod builds.
+    // in ../irl-core (branch 1.21.11) — must be resolvable before this mod builds.
     mavenLocal()
     mavenCentral()
 }
 
-// Minecraft 1.20.1 ships LWJGL 3.3.1; a transitive dep bumps it to 3.3.2,
-// which Sodium refuses to start against. Pin every LWJGL module back to 3.3.1.
-// 1.20.4 ships LWJGL 3.3.3 and needs no pin (V.lwjglPin = null).
-if (V.lwjglPin != null) {
-    configurations.all {
-        resolutionStrategy.eachDependency { details ->
-            if (details.requested.group == "org.lwjgl") {
-                details.useVersion V.lwjglPin
-            }
-        }
-    }
-}
-
 dependencies {
-    // Versions are chosen by the -Pmc selector at the top of this file.
     minecraft "com.mojang:minecraft:${V.minecraft}"
     mappings "net.fabricmc:yarn:${V.yarn}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
@@ -117,9 +89,7 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${V.fabricApi}"
 
     // Optional dev-client host override: -PbbsRuntimeJar=<path to another bbs-*.jar>.
-    // Compilation stays on V.bbsJar (the audited compile axis); only runClient boots the
-    // given jar, so one build is exercised against another BBS release (e.g. the
-    // caster-revision port checks on 2.5.2 with -PclientJvmArgs=-Dirlite.checkCasterRevisions=true).
+    // Compilation stays on V.bbsJar (the audited compile axis); only runClient boots the given jar.
     def bbsRuntimeJar = project.findProperty('bbsRuntimeJar')?.toString()
     if (bbsRuntimeJar) {
         logger.lifecycle("IRLite dev runtime BBS override: ${bbsRuntimeJar}")
@@ -130,19 +100,21 @@ dependencies {
     }
 
     // --- Shared BBS-free engine: light SSBO + .irlights patcher (irl-core) ---
-    // Per-version Loom module from mavenLocal: modClientImplementation remaps it from
-    // intermediary to this mod's named mappings; `include` bundles it (JiJ). Publish it
-    // with `gradlew publishToMavenLocal` in ../irl-core before building this mod.
+    // Per-version Loom module from mavenLocal (1.21.11 intermediary flavor): modClientImplementation
+    // remaps it to this mod's named mappings; `include` bundles it (JiJ).
     modClientImplementation "org.qualet:irl-core:1.1.6"
     include "org.qualet:irl-core:1.1.6"
 
-    // Iris is referenced at compile time (sampler mixins). Sodium is runtime-only.
+    // Iris is referenced at compile time (sampler mixins). Sodium 0.8.7 is the exact build
+    // Iris 1.10.7 pins; runtime-only.
     modImplementation "maven.modrinth:iris:${V.iris}"
     modRuntimeOnly "maven.modrinth:sodium:${V.sodium}"
 
     // Iris runtime dependencies (not auto-pulled from the Modrinth artifact).
+    // glsl-transformer 3.x additionally pulls antlr4-runtime at runtime.
     modRuntimeOnly "org.anarres:jcpp:1.4.14"
-    modRuntimeOnly "io.github.douira:glsl-transformer:2.0.0-pre13"
+    modRuntimeOnly "io.github.douira:glsl-transformer:3.0.0-pre3"
+    modRuntimeOnly "org.antlr:antlr4-runtime:4.13.1"
 }
 
 processResources {
@@ -162,16 +134,11 @@ processResources {
     from("patches") { into "assets/irlite/patches" }
 }
 
-def targetJavaVersion = 17
+def targetJavaVersion = 21
 tasks.withType(JavaCompile).configureEach {
-    // ensure that the encoding is set to UTF-8, no matter what the system default is
-    // this fixes some edge cases with special characters not displaying correctly
-    // see http://yodaconditions.net/blog/fix-for-java-file-encoding-problems-with-gradle.html
-    // If Javadoc is generated, this must be specified in that task too.
     it.options.encoding = "UTF-8"
-    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
-        it.options.release.set(targetJavaVersion)
-    }
+    it.options.release.set(targetJavaVersion)
+    it.options.compilerArgs += ["-Xmaxerrs", "2000"]
 }
 
 java {
@@ -179,9 +146,6 @@ java {
     if (JavaVersion.current() < javaVersion) {
         toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
     }
-    // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-    // if it is present.
-    // If you remove this line, sources will not be generated.
     withSourcesJar()
 }
 
@@ -191,18 +155,8 @@ jar {
     }
 }
 
-// Nested-jar hygiene. Bumping the irl-core coordinate on an incremental build
-// used to ship BOTH the old and the new core inside the mod jar, and Fabric
-// then silently loads the HIGHER version — i.e. the stale engine. Caught
-// 2026-07-20 when an editor build carried irl-core 1.1, 1.1.3 and 1.2 at once.
-//
-// Two separate leaks, both needed fixing:
-//  1. processIncludeJars stages includes into build/processIncludeJars and
-//     never prunes, so the previous coordinate's jar lingers there.
-//  2. remapJar appends its nested jars INTO THE EXISTING output jar instead of
-//     writing a fresh one, so a stale entry survives even when staging is
-//     clean (verified: purging staging alone did not fix the bump case).
-// Purging the staging dir and deleting the output jar up front covers both.
+// Nested-jar hygiene: purge the include staging dir and the output jar up front so a
+// bumped irl-core coordinate never ships alongside the stale one (see master for history).
 tasks.named("processIncludeJars") {
     outputs.upToDateWhen { false }
     doFirst {
@@ -217,20 +171,11 @@ tasks.named("remapJar") {
     }
 }
 
-// configure the maven publication
 publishing {
     publications {
         create("mavenJava", MavenPublication) {
             artifactId = project.archives_base_name
             from components.java
         }
-    }
-
-    // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
-    repositories {
-        // Add repositories to publish to here.
-        // Notice: This block does NOT have the same function as the block in the top level.
-        // The repositories here will be used for publishing your artifact, not for
-        // retrieving dependencies.
     }
 }

@@ -137,12 +137,12 @@ $scrBody = $pr[($SB + 1)..$endS]
 if ($scrBody[0] -cne '' -or $scrBody[1] -cne '') { throw "expected 2 leading blanks in screens body" }
 if (-not $scrBody[2].StartsWith('######## IRLIGHTS')) { throw "screens banner unexpected" }
 if ($scrBody.Count -ne 4) { throw "flat screen block expected 4 lines (2 blank + banner + screen.IRLIGHTS), got $($scrBody.Count)" }
+# No sliders op any more: wave 2 moved the last four IRLITE sliders (intensity,
+# specular intensity, toon bands/smoothing) into the mod's globals UBO, so the
+# sliders line is pristine again. Tripwire: an IRLITE slider added to
+# Modification would otherwise be silently missing from the patch.
 $slIdx2 = IndexOfLineStarting $pr 'sliders = '
-$slTriple = 'LPV_SATURATION LPV_TINT_SATURATION LPV_NORMAL_STRENGTH'
-$slPos = $pr[$slIdx2].IndexOf($slTriple)
-if ($slPos -lt 0) { throw "sliders tail anchor not found" }
-$slBody = $pr[$slIdx2].Substring($slPos)
-if (-not $slBody.EndsWith('IRLITE_TOON_SMOOTH')) { throw "sliders body tail unexpected" }
+if ($pr[$slIdx2] -match 'IRLITE_') { throw "sliders line carries an IRLITE option but the patch has no sliders op" }
 
 # ---- lang: anchors and bodies read from the files (no cyrillic/section-sign
 # literals in this script - PS 5.1 source encoding dodge) ----
@@ -220,7 +220,7 @@ Emit '@file shaders/dimensions/all_solid.vsh'
 Emit ('after "' + (EscAnchor $asAnchor) + '"')
 EmitBody @($asBody)
 Emit ''
-Emit '# --- SSBO feature flag, main-screen entry, screens + sliders ---'
+Emit '# --- SSBO feature flag, main-screen entry, settings screen ---'
 Emit '@file shaders/shaders.properties'
 Emit ('replace "' + (EscAnchor $featAnchor) + '"')
 EmitBody @($featLine)
@@ -228,8 +228,6 @@ Emit ('replace "' + (EscAnchor '[Misc_Settings] [Mod_support] \') + '"')
 EmitBody $miscBody
 Emit ('after "' + (EscAnchor '        screen.selection_box_outline = SELECT_BOX SELECT_BOX_COL_R SELECT_BOX_COL_G SELECT_BOX_COL_B') + '"')
 EmitBody $scrBody
-Emit ('replace "' + (EscAnchor $slTriple) + '"')
-EmitBody @($slBody)
 Emit ''
 Emit '# --- option labels + tooltips (English) ---'
 Emit '@file shaders/lang/en_us.lang'

@@ -75,14 +75,16 @@ $prBlock += ''                               # trailing blank (before-op reprodu
 $X = IndexOfLine $pr '        screen.PIXELATED_LIGHTING_SETTINGS=<empty> <empty> PIXELATED_SHADOWS PIXELATED_BLOCKLIGHT PIXELATED_AO PIXEL_SCALE TEXTURE_RES'
 $O = -1; for ($i = $X + 1; $i -lt $pr.Count; $i++) { if ($pr[$i].StartsWith('    screen.OTHER_SETTINGS=')) { $O = $i; break } }
 if ($O -lt 0) { throw "OTHER_SETTINGS not found" }
-$propsScreens = $pr[($X + 1)..($O - 1)]      # the 6 IRLITE screen lines
-$slLine = $pr | Where-Object { $_ -match 'WATER_BUMP_INTERACTIVE TEXTURE_RES IRLITE_INTENSITY' }
-if (@($slLine).Count -ne 1) { throw "sliders IRLITE line not unique" }
-$slIdx = $slLine.IndexOf('WATER_BUMP_INTERACTIVE TEXTURE_RES')
-if ($slIdx -lt 0) { throw "sliders tail anchor not found" }
-$slBody = $slLine.Substring($slIdx)
-if (-not $slBody.EndsWith('IRLITE_TOON_SMOOTH')) { throw "sliders body tail unexpected" }
-if ($slBody -notmatch 'IRLITE_TOON_BANDS') { throw "sliders body missing IRLITE_TOON_BANDS" }
+$propsScreens = $pr[($X + 1)..($O - 1)]      # the single flat IRLIGHTS screen line
+# No sliders op any more: wave 0 moved every IRLITE_VL_* slider into the mod's
+# globals UBO, wave 1 every IRLITE_OUTLINE_* one and wave 2 the last four
+# (intensity, specular intensity, toon bands/smoothing). Tripwire: an IRLITE
+# slider added to Modification would otherwise be silently missing from the patch.
+# RV's sliders list is backslash-continued over several lines, so scan all of them.
+$SL = -1; for ($i = 0; $i -lt $pr.Count; $i++) { if ($pr[$i].TrimStart().StartsWith('sliders=')) { if ($SL -ge 0) { throw "sliders line not unique" }; $SL = $i } }
+if ($SL -lt 0) { throw "sliders line not found" }
+$SE = $SL; while ($pr[$SE].EndsWith('\') -and ($SE + 1) -lt $pr.Count) { $SE++ }
+if (($pr[$SL..$SE] -join "`n") -match 'IRLITE_') { throw "sliders list carries an IRLITE option but the patch has no sliders op" }
 
 # ---- lang/en_US.lang (append block) ----
 $lg = Lines "$mod\lang\en_US.lang"
@@ -148,7 +150,7 @@ Emit '@file shaders/lib/pipelineSettings.glsl'
 Emit 'after "const int colortex14Format= RGBA16F;        //specular lighting"'
 EmitBody $psFormat
 Emit ''
-Emit '# --- deferred2 program toggle + buffer size, settings screens + sliders ---'
+Emit '# --- deferred2 program toggle + buffer size, settings screen ---'
 Emit '@file shaders/shaders.properties'
 Emit 'before "# Miscellaneous"'
 EmitBody $prBlock
@@ -156,8 +158,6 @@ Emit 'replace "VANILLAAO_I PLAYER_SHADOW"'
 EmitBody @('VANILLAAO_I PLAYER_SHADOW [IRLIGHTS]')
 Emit 'after "        screen.PIXELATED_LIGHTING_SETTINGS=<empty> <empty> PIXELATED_SHADOWS PIXELATED_BLOCKLIGHT PIXELATED_AO PIXEL_SCALE TEXTURE_RES"'
 EmitBody $propsScreens
-Emit 'replace "WATER_BUMP_INTERACTIVE TEXTURE_RES"'
-EmitBody @($slBody)
 Emit ''
 Emit '# --- option labels + tooltips ---'
 Emit '@file shaders/lang/en_US.lang'

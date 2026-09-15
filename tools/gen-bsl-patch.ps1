@@ -31,7 +31,7 @@ $fl = Lines "$mod\lib\lighting\forwardLighting.glsl"
 $S2 = IndexOfLine $fl '    //albedo = vec3(0.5);'
 $E2 = IndexOfLine $fl '    albedo *= max(sceneLighting + blockLighting + emissiveLighting + nightVisionLighting + minLighting, vec3(0.0));'
 $flCompute = $fl[($S2 + 1)..($E2 - 1)]      # #if..#endif + trailing blank (before-op)
-if (-not $flCompute[0].StartsWith('    #if defined IRLITE_ACTIVE')) { throw "flCompute head unexpected" }
+if (-not $flCompute[0].StartsWith('    #ifdef IRLITE_ACTIVE')) { throw "flCompute head unexpected" }
 if ($flCompute[-1] -ne '') { throw "flCompute must end with a blank line" }
 $A3 = IndexOfLine $fl '    albedo *= vanillaDiffuse * smoothLighting * smoothLighting;'
 $B3 = IndexOfLine $fl '    // albedo = blocklightCol * 0.25;'
@@ -60,11 +60,10 @@ if (-not $prScreens[1].EndsWith('IRLITE_SHADOWS')) { throw "screen.IRLIGHTS not 
 if ($pr[$SAO + 3] -ne '') { throw "expected blank after the IRLITE screen" }
 $slLine = $pr | Where-Object { $_.StartsWith('sliders=') }
 if (@($slLine).Count -ne 1) { throw "sliders line not unique" }
-$slIdx = $slLine.IndexOf('RETRO_FILTER_DEPTH WORLD_CURVATURE_SIZE')
-if ($slIdx -lt 0) { throw "sliders tail anchor not found" }
-$slBody = $slLine.Substring($slIdx)
-if (-not $slBody.EndsWith('IRLITE_TOON_SMOOTH')) { throw "sliders body tail unexpected" }
-if ($slBody -notmatch 'IRLITE_TOON_BANDS') { throw "sliders body missing IRLITE_TOON_BANDS" }
+# No sliders op any more: wave 2 moved the last four IRLITE sliders (intensity,
+# specular intensity, toon bands/smoothing) into the mod's globals UBO. Tripwire:
+# an IRLITE slider added to Modification would otherwise be silently missing from the patch.
+if ($slLine -match 'IRLITE_') { throw "sliders line carries an IRLITE option but the patch has no sliders op" }
 
 $lg = Lines "$mod\lang\en_US.lang"
 $Y = IndexOfLine $lg 'option.WHITE_WORLD.comment=Replaces textures with flat white color.'
@@ -150,7 +149,7 @@ Emit '@file shaders/program/final.glsl'
 Emit 'after "const int colortex9Format = RGB16F; //colored light"'
 EmitBody @('const int colortex10Format = RGB16F; //IRLite reduced-res volumetric light (deferred2)')
 Emit ''
-Emit '# --- SSBO feature flag, deferred2 toggle + buffer size, settings screens + sliders ---'
+Emit '# --- SSBO feature flag, deferred2 toggle + buffer size, settings screen ---'
 Emit '@file shaders/shaders.properties'
 Emit 'replace "iris.features.optional=CUSTOM_IMAGES FADE_VARIABLE"'
 EmitBody @('iris.features.optional=CUSTOM_IMAGES FADE_VARIABLE SSBO')
@@ -160,8 +159,6 @@ Emit 'replace "DYNAMIC_HANDLIGHT HALF_LAMBERT"'
 EmitBody @('DYNAMIC_HANDLIGHT HALF_LAMBERT [IRLIGHTS]')
 Emit 'after "screen.AO=<empty> <empty> AO_METHOD <empty> <empty> <empty> AO_STRENGTH ambientOcclusionLevel"'
 EmitBody $prScreens
-Emit 'replace "RETRO_FILTER_DEPTH WORLD_CURVATURE_SIZE"'
-EmitBody @($slBody)
 Emit ''
 Emit '# --- option labels + tooltips ---'
 Emit '@file shaders/lang/en_US.lang'

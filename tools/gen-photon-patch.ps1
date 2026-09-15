@@ -48,6 +48,14 @@ $libText = FileText "$mod\include\irlite\irlite_lights.glsl"
 $enIns = ExtractInsertion (Lines "$orig\lang\en_US.lang") (Lines "$mod\lang\en_US.lang")
 $ruIns = ExtractInsertion (Lines "$orig\lang\ru_RU.lang") (Lines "$mod\lang\ru_RU.lang")
 
+# No sliders op any more: wave 0 moved every IRLITE_VL_* slider into the mod's
+# globals UBO, wave 1 every IRLITE_OUTLINE_* one and wave 2 the last four
+# (intensity, specular intensity, toon bands/smoothing). Tripwire: an IRLITE
+# slider added to Modification would otherwise be silently missing from the patch.
+$slLine = Lines "$mod\shaders.properties" | Where-Object { $_ -match '^\s*sliders\s*=' }
+if (@($slLine).Count -ne 1) { throw "sliders line not unique" }
+if ($slLine -match 'IRLITE_') { throw "sliders line carries an IRLITE option but the patch has no sliders op" }
+
 # ---- assemble ----
 $sb = New-Object System.Text.StringBuilder
 function Emit($s) { [void]$sb.Append($s).Append("`n") }
@@ -83,8 +91,8 @@ EmitBody @(
 Emit ''
 Emit 'before "        // Specular highlight"'
 EmitBody @(
-    '        // IRLite diffuse + specular + outline in one pass.',
-    '#if defined IRLITE_DIFFUSE || defined IRLITE_SPECULAR',
+    '        // IRLite diffuse + specular + outline in one pass; the enables and both',
+    '        // intensities are live UBO values (see IRLITE_SURFACE_OK), nothing is compile-gated.',
     '        vec3 irlite_diffuse;',
     '        vec3 irlite_specular;',
     '        vec3 irlite_outline;',
@@ -98,15 +106,10 @@ EmitBody @(
     '            irlite_specular,',
     '            irlite_outline',
     '        );',
-    '#ifdef IRLITE_DIFFUSE',
-    '        fragment_color += IRLITE_INTENSITY * irlite_diffuse * material.albedo;',
-    '#endif',
-    '#ifdef IRLITE_SPECULAR',
-    '        fragment_color += (IRLITE_INTENSITY * IRLITE_SPECULAR_INTENSITY) * irlite_specular;',
-    '#endif',
+    '        fragment_color += IRLITE_INTENSITY_LIVE * irlite_diffuse * material.albedo;',
+    '        fragment_color += (IRLITE_INTENSITY_LIVE * IRLITE_SPECULAR_INTENSITY_LIVE) * irlite_specular;',
     '        // outline is runtime-gated inside irlite_lightSurface (UBO bit8); adds 0 when off',
-    '        fragment_color += IRLITE_INTENSITY * irlite_outline * material.albedo;',
-    '#endif',
+    '        fragment_color += IRLITE_INTENSITY_LIVE * irlite_outline * material.albedo;',
     '')
 Emit ''
 
@@ -158,10 +161,7 @@ Emit 'after "screen.box          = BOX_MODE BOX_LINE_WIDTH BOX_COLOR_R BOX_COLOR
 EmitBody @(
     '',
     '# IRLights (point/spot lights addon)',
-    'screen.IRLIGHTS            = <empty> <empty> IRLITE_DIFFUSE IRLITE_INTENSITY IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY IRLITE_VOLUMETRIC <empty> <empty> IRLITE_TOON <empty> IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH <empty> <empty> IRLITE_SHADOWS')
-Emit ''
-Emit 'replace "DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS"'
-EmitBody @('DH_OVERDRAW_FADE_LENGTH SHADOW_SSRT_STEPS IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH')
+    'screen.IRLIGHTS            = <empty> <empty> IRLITE_VOLUMETRIC <empty> <empty> <empty> IRLITE_SHADOWS')
 Emit ''
 Emit 'replace "iris.features.optional = CUSTOM_IMAGES ENTITY_TRANSLUCENT"'
 EmitBody @('iris.features.optional = CUSTOM_IMAGES ENTITY_TRANSLUCENT SSBO')

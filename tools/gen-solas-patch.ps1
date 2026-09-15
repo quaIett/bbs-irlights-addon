@@ -66,7 +66,7 @@ if ($c1Body[-1] -ne '') { throw "expected trailing blank in c1Body" }
 $fg = Lines "$mod\programs\final.glsl"
 [void](IndexOfLine $fg 'const int colortex10Format = RGB16F; //IRLite reduced-res volumetrics')
 
-# shaders.properties: toggles+size.buffer block, screen tail+screens, sliders tail.
+# shaders.properties: toggles+size.buffer block, screen tail+screen (no sliders op since wave 2).
 $pr = Lines "$mod\shaders.properties"
 $T = IndexOfLine $pr 'program.world0/deferred2.enabled=IRLITE_VOLUMETRIC'
 $prToggles = $pr[$T..($T + 5)]
@@ -84,10 +84,10 @@ if (-not $screens[0].StartsWith('screen.IRLIGHTS=')) { throw "screens block head
 if ($pr[$SL + 2].StartsWith('screen.IRLIGHTS_')) { throw "flat screen expected, found a leftover IRLIGHTS sub-screen" }
 $slLine = $pr | Where-Object { $_.StartsWith('sliders=') }
 if (@($slLine).Count -ne 1) { throw "sliders line not unique" }
-$slIdx = $slLine.IndexOf('BLOOM_STRENGTH_END WAVING_AMPLITUDE')
-if ($slIdx -lt 0) { throw "sliders tail anchor not found" }
-$slBody = $slLine.Substring($slIdx)
-if (-not $slBody.EndsWith('IRLITE_TOON_SMOOTH')) { throw "sliders body tail unexpected" }
+# No sliders op any more: wave 2 moved the last four IRLITE sliders (intensity,
+# specular intensity, toon bands/smoothing) into the mod's globals UBO. Tripwire:
+# an IRLITE slider added to Modification would otherwise be silently missing from the patch.
+if ($slLine -match 'IRLITE_') { throw "sliders line carries an IRLITE option but the patch has no sliders op" }
 
 # lang: everything after the pack's true last line, both locales. The ru anchor
 # line is taken from the file itself (no cyrillic literals in this script).
@@ -157,7 +157,7 @@ Emit '@file shaders/programs/final.glsl'
 Emit 'after "const int colortex7Format = RGBA16; //fresnel data"'
 EmitBody @('const int colortex10Format = RGB16F; //IRLite reduced-res volumetrics')
 Emit ''
-Emit '# --- SSBO feature flag, deferred2 toggles + buffer size, screens + sliders ---'
+Emit '# --- SSBO feature flag, deferred2 toggles + buffer size, settings screen ---'
 Emit '@file shaders/shaders.properties'
 Emit 'replace "iris.features.optional=CUSTOM_IMAGES"'
 EmitBody @('iris.features.optional=CUSTOM_IMAGES SSBO')
@@ -165,8 +165,6 @@ Emit 'after "program.world1/shadowcomp.enabled=VX_SUPPORT"'
 EmitBody $prToggles
 Emit 'replace "VANILLA_AO SSAO AO_STRENGTH"'
 EmitBody (@($screenTail) + $screens)
-Emit 'replace "BLOOM_STRENGTH_END WAVING_AMPLITUDE"'
-EmitBody @($slBody)
 Emit ''
 Emit '# --- option labels + tooltips (English) ---'
 Emit '@file shaders/lang/en_US.lang'

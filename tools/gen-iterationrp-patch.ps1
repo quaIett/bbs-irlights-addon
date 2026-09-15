@@ -27,7 +27,7 @@ $libText = FileText "$mod\Lib\irlite_lights.glsl"
 if (-not $libText.Contains("irlite_outlineFactor")) { throw "outline missing from the lib" }
 if (-not $libText.EndsWith("`n")) { throw "lib must end with a newline" }
 
-# Soild_FS: include pair + diffuse block (before-op) + specular block (after-op)
+# Soild_FS: include pair + diffuse block (before-op) + specular line (after-op)
 $sf = Lines "$mod\Lib\Programs\Composite\Soild_FS.glsl"
 $sfInc = IndexOfLine $sf '#include "/Lib/BasicFunctions/Blocklight.glsl"'
 if ($sf[$sfInc + 1] -cne '#define IRLITE_SURFACE_PASS') { throw "Soild_FS include op line 1 unexpected" }
@@ -36,10 +36,11 @@ $sfPre = IndexOfLine $sf ($T + $T + $T + 'color = color * (1.0 - metalnessMask *
 $sfAnc = IndexOfLine $sf ($T + $T + $T + 'color = color * gbuffer.albedo + sunlightSpecular;')
 $sfDiffuse = $sf[($sfPre + 1)..($sfAnc - 1)]
 if (-not $sfDiffuse[0].StartsWith($T + $T + $T + 'bool irlite_nonTerrain')) { throw "Soild_FS diffuse head unexpected" }
-if ($sfDiffuse[-1] -cne ($T + $T + $T + '#endif')) { throw "Soild_FS diffuse tail unexpected" }
-$sfSpec = $sf[($sfAnc + 1)..($sfAnc + 3)]
-if ($sfSpec[0] -cne ($T + $T + $T + '#ifdef IRLITE_SPECULAR')) { throw "Soild_FS spec head unexpected" }
-if ($sfSpec[-1] -cne ($T + $T + $T + '#endif')) { throw "Soild_FS spec tail unexpected" }
+# Wave 2: the diffuse/specular #ifdef gates are gone (enables + intensities are live UBO values).
+if ($sfDiffuse[-1] -cne ($T + $T + $T + 'color += IRLITE_INTENSITY_LIVE * irliteDiffuse;')) { throw "Soild_FS diffuse tail unexpected" }
+$sfSpec = @($sf[$sfAnc + 1])
+if ($sfSpec[0] -cne ($T + $T + $T + 'color += (IRLITE_INTENSITY_LIVE * IRLITE_SPECULAR_INTENSITY_LIVE) * irliteSpecular;')) { throw "Soild_FS spec line unexpected" }
+if ($sf[$sfAnc + 2] -cne '') { throw "Soild_FS spec add must be a single line followed by the pack's blank line" }
 
 # Volumetric_FS: include pair + VL call block (after-op)
 $vf = Lines "$mod\Lib\Programs\Composite\Volumetric_FS.glsl"
@@ -57,7 +58,7 @@ if ($vf[$vfAnc + 7] -cne ($T + $T + '#endif')) { throw "expected the VFOG #endif
 $ef = FileText "$mod\Lib\Programs\Gbuffers\Entities_FS.glsl"
 if (-not $ef.Contains('Pack2xU8_to_U16(vec2(parallaxShadow, (v_materialIDs + 128.0) / 255.0))')) { throw "Entities_FS +128 missing" }
 
-# shaders.properties: features flag, main-screen entry, screen tree, sliders
+# shaders.properties: features flag, main-screen entry, screen tree (sliders: tripwire only)
 $pr  = Lines "$mod\shaders.properties"
 $prO = Lines "$org\shaders.properties"
 $shIdx = -1
@@ -80,9 +81,13 @@ if (-not $prTree[1].StartsWith($T + 'screen.IRLIGHTS')) { throw "screen tree hea
 if ($prTree -match 'screen\.IRLIGHTS_(SPECULAR|SHADOWS|TOON|VOLUMETRIC|OUTLINE)') { throw "flat screen must carry no IRLIGHTS sub-screens" }
 $slAncText = 'sliders=PT_VOXEL_RESOLUTION_X PT_VOXEL_RESOLUTION_Y \'
 $slAnc = IndexOfLine $pr $slAncText
-$slBody = $pr[$slAnc + 1]
-if (-not $slBody.StartsWith($T + 'IRLITE_INTENSITY')) { throw "sliders body head unexpected" }
-if (-not $slBody.EndsWith('IRLITE_TOON_SMOOTH \')) { throw "sliders body tail unexpected" }
+# No sliders op any more: wave 0 moved every IRLITE_VL_* slider into the mod's
+# globals UBO, wave 1 every IRLITE_OUTLINE_* one and wave 2 the last four
+# (intensity, specular intensity, toon bands/smoothing). Tripwire: an IRLITE
+# slider added to Modification would otherwise be silently missing from the patch.
+$slEnd = $slAnc
+while ($slEnd + 1 -lt $pr.Count -and $pr[$slEnd].EndsWith('\')) { $slEnd++ }   # whole backslash-continued sliders list
+if (@($pr[$slAnc..$slEnd] -match 'IRLITE_').Count -gt 0) { throw "sliders list carries an IRLITE option but the patch has no sliders op" }
 
 # lang/en_us.lang: label block
 $lg  = Lines "$mod\lang\en_us.lang"
@@ -144,8 +149,6 @@ Emit ('replace "' + $shAnchor.Replace('\', '\\') + '"')
 EmitBody @($shBody1, $shLine2)
 Emit ('after "' + $scAncText + '"')
 EmitBody $prTree
-Emit ('after "' + $slAncText.Replace('\', '\\') + '"')
-EmitBody @($slBody)
 Emit ''
 Emit '# --- option labels ---'
 Emit '@file shaders/lang/en_us.lang'

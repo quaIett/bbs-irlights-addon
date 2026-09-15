@@ -71,17 +71,14 @@ if ($pr[$SB - 1] -ne '        size.buffer.colortex7 = REFLECTION_RES REFLECTION_
 $X = IndexOfLine $pr '        screen.PIXELATED_LIGHTING_SETTINGS=<empty> <empty> PIXELATED_SHADOWS PIXELATED_BLOCKLIGHT PIXELATED_AO PIXEL_SCALE'
 $O = -1; for ($i = $X + 1; $i -lt $pr.Count; $i++) { if ($pr[$i].StartsWith('    screen.OTHER_SETTINGS=')) { $O = $i; break } }
 if ($O -lt 0) { throw "OTHER_SETTINGS not found" }
-$propsScreens = $pr[($X + 1)..($O - 1)]     # the IRLITE screen lines (5 since the outline screen moved into BBS)
+$propsScreens = $pr[($X + 1)..($O - 1)]     # the single flat IRLIGHTS screen line
 $slLine = $pr | Where-Object { $_.TrimStart().StartsWith('sliders=') }
 if (@($slLine).Count -ne 1) { throw "sliders line not unique" }
-$slIdx = $slLine.IndexOf('END_STAR_INTENSITY GENERATED_NORMAL_RES')
-if ($slIdx -lt 0) { throw "sliders tail anchor not found" }
-$slBody = $slLine.Substring($slIdx)
-if (-not $slBody.EndsWith('IRLITE_TOON_SMOOTH')) { throw "sliders body tail unexpected" }
-# Sentinel must be an option that survives the UI cleanup: every IRLITE_VL_* slider
-# was dropped from the Iris screens in wave 0, and every IRLITE_OUTLINE_* one in
-# wave 1 — their values come from the mod's globals UBO at runtime instead.
-if ($slBody -notmatch 'IRLITE_TOON_BANDS') { throw "sliders body missing IRLITE_TOON_BANDS" }
+# No sliders op any more: wave 0 moved every IRLITE_VL_* slider into the mod's
+# globals UBO, wave 1 every IRLITE_OUTLINE_* one and wave 2 the last four
+# (intensity, specular intensity, toon bands/smoothing). Tripwire: an IRLITE
+# slider added to Modification would otherwise be silently missing from the patch.
+if ($slLine -match 'IRLITE_') { throw "sliders line carries an IRLITE option but the patch has no sliders op" }
 
 $lg = Lines "$mod\lang\en_US.lang"
 $Y = IndexOfLine $lg 'option.XLIGHT_CURVE.comment=Adjusts how quickly the intensity of blocklight fades away as it travels distance away from the light source.'
@@ -145,7 +142,7 @@ Emit '@file shaders/lib/pipelineSettings.glsl'
 Emit 'after "const int colortex8Format = RGBA16F;        //SSR results for WSR, topmost translucent opacity"'
 EmitBody $psFormat
 Emit ''
-Emit '# --- deferred2 program toggle + buffer size, settings screens + sliders ---'
+Emit '# --- deferred2 program toggle + buffer size, settings screen ---'
 Emit '@file shaders/shaders.properties'
 Emit 'before "# Miscellaneous"'
 EmitBody $prToggles
@@ -155,8 +152,6 @@ Emit 'replace "VANILLAAO_I PLAYER_SHADOW"'
 EmitBody @('VANILLAAO_I PLAYER_SHADOW [IRLIGHTS]')
 Emit 'after "        screen.PIXELATED_LIGHTING_SETTINGS=<empty> <empty> PIXELATED_SHADOWS PIXELATED_BLOCKLIGHT PIXELATED_AO PIXEL_SCALE"'
 EmitBody $propsScreens
-Emit 'replace "END_STAR_INTENSITY GENERATED_NORMAL_RES"'
-EmitBody @($slBody)
 Emit ''
 Emit '# --- option labels + tooltips ---'
 Emit '@file shaders/lang/en_US.lang'

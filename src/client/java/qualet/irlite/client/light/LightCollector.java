@@ -200,10 +200,20 @@ public final class LightCollector
             IrliteConfig.outlinePixelSize()
         );
         VlGlobalsBuffer.setShadow(IrliteConfig.shadowsLive(), IrliteConfig.shadowSoftness());
+        VlGlobalsBuffer.setSurface(
+            IrliteConfig.diffuse(),
+            IrliteConfig.intensity(),
+            IrliteConfig.specular(),
+            IrliteConfig.specularIntensity(),
+            IrliteConfig.toon(),
+            IrliteConfig.toonBands(),
+            IrliteConfig.toonSmooth()
+        );
         // Dev VL profiler sweep (-Dirlite.profileVl=true): may re-issue the push
         // above with per-config flag overrides — last write wins before upload.
         // New VlGlobalsBuffer.set args must be mirrored in VlSweep.overrideVlGlobals.
-        // setOutline is NOT mirrored there by design — the sweep only varies VL.
+        // setOutline/setShadow/setSurface are NOT mirrored there by design — the
+        // sweep only varies VL, and their flag words are separate from set()'s.
         VlProfiler.overrideVlGlobals();
 
         if (world == null || cameraPos == null)

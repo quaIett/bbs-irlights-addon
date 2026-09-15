@@ -13,9 +13,9 @@
 /* IRLite SSBO binding 7 — std430 mirror of LightBuffer.java. */
 
 // ---- options (exposed in the IRLite shader settings screen) ----
-#define IRLITE_DIFFUSE
-#define IRLITE_SPECULAR
 #define IRLITE_VOLUMETRIC                  // per-light volumetric beams/haze (reduced-res deferred2 pass)
+// Wave 2: diffuse/specular/toon are no longer #define toggles — their enables and the
+// numbers below are live in the globals UBO (IRLITE_SURFACE_OK); these are the fallback.
 #define IRLITE_INTENSITY 1.0 // [0.1 0.25 0.5 0.75 1.0 1.5 2.0 3.0 4.0]
 #define IRLITE_SPECULAR_INTENSITY 1.0 // [0.0 0.25 0.5 0.75 1.0 1.5 2.0 3.0 4.0]
 
@@ -67,7 +67,7 @@
 #define IRLITE_VL_NOISE_SPEED 0.25 // [0.0 0.25 0.5 1.0 1.5 2.0 3.0]
 #define IRLITE_VL_NOISE_STRIDE 2 // [1 2 3 4]
 
-//#define IRLITE_TOON
+// Toon enable is vlC.w bit17 (off when no mod drives the UBO); bands/smoothing below are the fallback.
 #define IRLITE_TOON_BANDS 3 // [2 3 4 5 6 8]
 #define IRLITE_TOON_SMOOTH 0.10 // [0.0 0.05 0.10 0.20 0.30 0.50]
 
@@ -131,10 +131,11 @@ layout(std140, binding = 7) uniform IrliteVlGlobals
 {
     vec4 irlite_vlA;   // x intensity, y maxDist, z tipBoost, w tipRadius
     vec4 irlite_vlB;   // x noiseAmount, y noiseScale, z noiseSpeed, w frameIndex (0..4095, temporal dither rotation)
-    uvec4 irlite_vlC;  // x stepMax, y shadowStride, z noiseStride, w flags (bit0 VL shadows, bit1 noise, bit2 blueNoise, bit3 ditherTemporal, bit4 clusterCull, bit5 hiZSkip, bit6 bilateralUpsample, bit7 GLOBALS VALID, bit8 outline, bit9 outlineFront, bit10 outlineGlow, bits11-12 outlineTarget, bit13 surface/outline shadows DISABLED)
+    uvec4 irlite_vlC;  // x stepMax, y shadowStride, z noiseStride, w flags (bit0 VL shadows, bit1 noise, bit2 blueNoise, bit3 ditherTemporal, bit4 clusterCull, bit5 hiZSkip, bit6 bilateralUpsample, bit7 GLOBALS VALID, bit8 outline, bit9 outlineFront, bit10 outlineGlow, bits11-12 outlineTarget, bit13 surface/outline shadows DISABLED, bit14 SURFACE VALID, bit15 diffuse, bit16 specular, bit17 toon)
     vec4 irlite_vlD;   // x noiseMorph (0 = morph off, drift only), y bilateral depth sigma in blocks (0 = default), z/w reserved (written as 0)
     vec4 irlite_vlE;   // outline: x strength, y fresnelPower, z back, w frontStrength
     vec4 irlite_vlF;   // x outline glowStrength, y outline pixelSize (int-valued float), z shadow light size (penumbra width), w reserved (written as 0)
+    vec4 irlite_vlG;   // surface: x master intensity (diffuse, specular, outline), y specular intensity, z toon bands (int-valued float), w toon smoothing
 };
 
 // Wave 1 (2026-07-21): the outline knobs moved from #define to this UBO, so they
@@ -180,6 +181,19 @@ layout(std140, binding = 7) uniform IrliteVlGlobals
 // FLAG_GLOBALS_VALID (bit7) only vouches that the block was written at all, not
 // that this particular field was — so the enable cannot key off bit7.
 #define IRLITE_SHADOWS_LIVE (!IRLITE_GLOBALS_OK || (irlite_vlC.w & 8192u) == 0u)
+
+// Wave 2 (2026-09-15): the surface knobs — master and specular intensity, toon
+// bands and smoothing (vlG) plus the diffuse/specular/toon enables (bits15-17).
+// They have their own "written" bit, bit14, instead of riding bit7: a core from
+// waves 1/3 sets bit7 but has no vlG at all, so bit7 would vouch for bytes that
+// core never uploads. With bit14 clear every surface knob takes its fallback,
+// which is the pre-migration default look (diffuse + specular on, toon off).
+#define IRLITE_SURFACE_OK ((irlite_vlC.w & 16384u) != 0u)
+#define IRLITE_INTENSITY_LIVE (IRLITE_SURFACE_OK ? irlite_vlG.x : IRLITE_INTENSITY)
+#define IRLITE_SPECULAR_INTENSITY_LIVE (IRLITE_SURFACE_OK ? irlite_vlG.y : IRLITE_SPECULAR_INTENSITY)
+#define IRLITE_DIFFUSE_LIVE (!IRLITE_SURFACE_OK || (irlite_vlC.w & 32768u) != 0u)
+#define IRLITE_SPECULAR_LIVE (!IRLITE_SURFACE_OK || (irlite_vlC.w & 65536u) != 0u)
+#define IRLITE_TOON_LIVE (IRLITE_SURFACE_OK && (irlite_vlC.w & 131072u) != 0u)
 
 // ---- cluster grid (binding 6) — std430 mirror of ClusterGridBuffer.java; per-fragment screen-tile light mask ----
 // Second SSBO in this unit: the binding-7 #extension above already enables SSBOs for the whole program, so nothing extra is needed here.
@@ -1181,20 +1195,15 @@ vec3 irlite_outlineInk(vec3 playerPos, vec3 flatNormal)
 #ifdef IRLITE_SURFACE_PASS
 
 // Toon banding: quantize lit factor into bands with soft top-edge blend.
-float irlite_toon(float x)
+// Only called with toon on; bands and smoothing w arrive resolved from the UBO.
+float irlite_toon(float x, float bands, float w)
 {
-    #ifdef IRLITE_TOON
-        x = clamp(x, 0.0, 1.0);
-        float bands = float(IRLITE_TOON_BANDS);
-        float scaled = x * bands;
-        float band = floor(scaled);
-        float frac = scaled - band;
-        float w = clamp(IRLITE_TOON_SMOOTH, 0.0, 1.0);
-        float t = (w <= 1e-4) ? 0.0 : smoothstep(1.0 - w, 1.0, frac);
-        return (band + t) / bands;
-    #else
-        return x;
-    #endif
+    x = clamp(x, 0.0, 1.0);
+    float scaled = x * bands;
+    float band = floor(scaled);
+    float frac = scaled - band;
+    float t = (w <= 1e-4) ? 0.0 : smoothstep(1.0 - w, 1.0, frac);
+    return (band + t) / bands;
 }
 
 // Diffuse + specular in one SSBO pass; per-light geometry + shadow computed once.
@@ -1206,6 +1215,15 @@ void irlite_lightSurface(vec3 playerPos, vec3 normalM, vec3 nViewPos, float smoo
 
     uint count = irlite_lightCount;
     if (count == 0u) return;   // empty scene: skip the matrix work in every gbuffers program
+
+    // Live surface knobs, loop-invariant. Both enables off skips the loop outright,
+    // which is what the old compile-time DIFFUSE/SPECULAR pair did.
+    bool irlDiffuseOn = IRLITE_DIFFUSE_LIVE;
+    bool irlSpecularOn = IRLITE_SPECULAR_LIVE;
+    if (!irlDiffuseOn && !irlSpecularOn) return;
+    bool irlToonOn = IRLITE_TOON_LIVE;
+    float irlToonBands = IRLITE_SURFACE_OK ? irlite_vlG.z : float(IRLITE_TOON_BANDS);
+    float irlToonSmooth = clamp(IRLITE_SURFACE_OK ? irlite_vlG.w : IRLITE_TOON_SMOOTH, 0.0, 1.0);
 
     vec3 fragWorld = playerPos;
     mat3 viewToWorld = mat3(gbufferModelViewInverse);
@@ -1296,18 +1314,20 @@ void irlite_lightSurface(vec3 playerPos, vec3 normalM, vec3 nViewPos, float smoo
         vec3 lightCol = pow(max(light.colorIntensity.rgb, vec3(0.0)), vec3(1.0 / 2.2))
                       * light.colorIntensity.a;
 
-        float diffuse = irlite_toon(attenuation * ndl);
-        diffuseOut += lightCol * diffuse;
+        if (irlDiffuseOn)
+        {
+            float diffuse = attenuation * ndl;
+            if (irlToonOn) diffuse = irlite_toon(diffuse, irlToonBands, irlToonSmooth);
+            diffuseOut += lightCol * diffuse;
+        }
 
-        #ifdef IRLITE_SPECULAR
-            if (ndl > 0.0)
-            {
-                // Specular on non-terrain only (terrain has no material smoothness data).
-                vec3 Lview = normalize(worldToView * L);
-                float ndlV = max(dot(normalM, Lview), 0.0);
-                specularOut += GGX(normalM, nViewPos, Lview, ndlV, smoothnessG) * lightCol * attenuation;
-            }
-        #endif
+        if (irlSpecularOn && ndl > 0.0)
+        {
+            // Specular on non-terrain only (terrain has no material smoothness data).
+            vec3 Lview = normalize(worldToView * L);
+            float ndlV = max(dot(normalM, Lview), 0.0);
+            specularOut += GGX(normalM, nViewPos, Lview, ndlV, smoothnessG) * lightCol * attenuation;
+        }
     }
 
     // 5x baselines (surfaceMult/energyMult = 5.0).
@@ -2167,8 +2187,9 @@ after "#include \"/lib/lighting/ggx.glsl\""
 after "    finalDiffuse = sqrt(max(finalDiffuse, vec3(0.0))); // sqrt() for a bit more realistic light mix, max() to prevent NaNs"
 <<<
 
-    #if defined IRLITE_ACTIVE && (defined IRLITE_DIFFUSE || defined IRLITE_SPECULAR)
-        // IRLite point/spot lights; entity flag is compile-time.
+    #ifdef IRLITE_ACTIVE
+        // IRLite point/spot lights; entity flag is compile-time. The diffuse/specular
+        // enables and both intensities are live UBO values (see IRLITE_SURFACE_OK).
         #if defined GBUFFERS_ENTITIES || defined GBUFFERS_BLOCK || defined GBUFFERS_HAND
             bool irliteNonTerrain = true;
         #else
@@ -2176,15 +2197,13 @@ after "    finalDiffuse = sqrt(max(finalDiffuse, vec3(0.0))); // sqrt() for a bi
         #endif
         vec3 irliteDiffuse, irliteSpecular;
         irlite_lightSurface(playerPos, normalM, nViewPos, smoothnessG, irliteNonTerrain, irliteDiffuse, irliteSpecular);
-        #ifdef IRLITE_DIFFUSE
-            finalDiffuse += IRLITE_INTENSITY * irliteDiffuse;
-        #endif
+        finalDiffuse += IRLITE_INTENSITY_LIVE * irliteDiffuse;
     #endif
 >>>
 after "    color.rgb += lightHighlight;"
 <<<
-    #if defined IRLITE_ACTIVE && defined IRLITE_SPECULAR
-        color.rgb += (IRLITE_INTENSITY * IRLITE_SPECULAR_INTENSITY) * irliteSpecular;
+    #ifdef IRLITE_ACTIVE
+        color.rgb += (IRLITE_INTENSITY_LIVE * IRLITE_SPECULAR_INTENSITY_LIVE) * irliteSpecular;
     #endif
 >>>
 
@@ -2220,7 +2239,7 @@ before "    color = pow(color, vec3(2.2));"
                 vec3 irliteFlatN = irliteDerivN;
             #endif
             if (dot(irliteFlatN, irliteOPlayerPos) > 0.0) irliteFlatN = -irliteFlatN;
-            color += IRLITE_INTENSITY * irlite_outlineInk(irliteOPlayerPos, irliteFlatN);
+            color += IRLITE_INTENSITY_LIVE * irlite_outlineInk(irliteOPlayerPos, irliteFlatN);
         }
     #endif
 
@@ -2282,7 +2301,7 @@ after "const int colortex8Format = RGBA16F;        //SSR results for WSR, topmos
 const int colortex10Format = RGB16F;        //IRLite reduced-res volumetric (added deferred2 pass)
 >>>
 
-# --- deferred2 program toggle + buffer size, settings screens + sliders ---
+# --- deferred2 program toggle + buffer size, settings screen ---
 @file shaders/shaders.properties
 before "# Miscellaneous"
 <<<
@@ -2303,11 +2322,7 @@ VANILLAAO_I PLAYER_SHADOW [IRLIGHTS]
 >>>
 after "        screen.PIXELATED_LIGHTING_SETTINGS=<empty> <empty> PIXELATED_SHADOWS PIXELATED_BLOCKLIGHT PIXELATED_AO PIXEL_SCALE"
 <<<
-        screen.IRLIGHTS=<empty> <empty> IRLITE_DIFFUSE IRLITE_INTENSITY IRLITE_SPECULAR IRLITE_SPECULAR_INTENSITY IRLITE_VOLUMETRIC IRLITE_VL_RESOLUTION <empty> <empty> IRLITE_TOON <empty> IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH <empty> <empty> IRLITE_SHADOWS
->>>
-replace "END_STAR_INTENSITY GENERATED_NORMAL_RES"
-<<<
-END_STAR_INTENSITY GENERATED_NORMAL_RES IRLITE_INTENSITY IRLITE_SPECULAR_INTENSITY IRLITE_TOON_BANDS IRLITE_TOON_SMOOTH
+        screen.IRLIGHTS=<empty> <empty> IRLITE_VOLUMETRIC IRLITE_VL_RESOLUTION <empty> <empty> IRLITE_SHADOWS
 >>>
 
 # --- option labels + tooltips ---
@@ -2316,19 +2331,7 @@ after "option.XLIGHT_CURVE.comment=Adjusts how quickly the intensity of blocklig
 <<<
 
 screen.IRLIGHTS=§6§lIRLights§r
-screen.IRLIGHTS.comment=Dynamic point and spot lights from the IRLights BBS addon. Requires the IRLights mod to feed the lights — without it these settings do nothing.
-
-option.IRLITE_DIFFUSE=§6Diffuse Lighting
-option.IRLITE_DIFFUSE.comment=Surface lighting from IRLights point/spot lights.
-
-option.IRLITE_INTENSITY=§6Master Intensity
-option.IRLITE_INTENSITY.comment=Multiplier for all IRLights lighting.
-
-option.IRLITE_SPECULAR=§bSpecular Highlights
-option.IRLITE_SPECULAR.comment=Specular highlight from IRLights lights, using the pack's own specular model.
-
-option.IRLITE_SPECULAR_INTENSITY=§bSpecular Intensity
-option.IRLITE_SPECULAR_INTENSITY.comment=Multiplier for the IRLights specular highlight.
+screen.IRLIGHTS.comment=Dynamic point and spot lights from the IRLights BBS addon. Requires the IRLights mod to feed the lights — without it these settings do nothing. Brightness, specular, toon, outline and shadow settings live in the mod's own IRLights settings and apply instantly.
 
 option.IRLITE_SHADOWS=§3Light Shadows
 option.IRLITE_SHADOWS.comment=§cCompatibility escape hatch, not the normal on/off.§r For everyday use switch shadows in the mod's own settings — that applies instantly. Turning this OFF removes the samplerCubeArray declaration and the whole shadow code path from the compiled shader; reach for it only if the pack fails to compile on an exotic driver. §e[*]§r Requires a shaderpack reload.
@@ -2341,13 +2344,4 @@ option.IRLITE_VL_RESOLUTION.comment=Resolution of the volumetric ray march (its 
 value.IRLITE_VL_RESOLUTION.1.0=Full
 value.IRLITE_VL_RESOLUTION.0.5=Half
 value.IRLITE_VL_RESOLUTION.0.25=Quarter
-
-option.IRLITE_TOON=§aToon Shading
-option.IRLITE_TOON.comment=Quantizes IRLights lighting into discrete bands (cel shading).
-
-option.IRLITE_TOON_BANDS=§aBands
-option.IRLITE_TOON_BANDS.comment=Number of brightness bands.
-
-option.IRLITE_TOON_SMOOTH=§aBand Smoothing
-option.IRLITE_TOON_SMOOTH.comment=Softness of the band edges.
 >>>

@@ -8,9 +8,12 @@ import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.forms.entities.IEntity;
 import mchorse.bbs_mod.forms.renderers.FormRenderer;
 import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
+import mchorse.bbs_mod.forms.renderers.ModelFormRenderer;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.irisshaders.iris.gl.state.ValueUpdateNotifier;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.VertexConsumerProvider;
+import org.lwjgl.opengl.GL11;
 import org.qualet.irl.light.shadow.ShadowBakeState;
 import qualet.irlite.mixin.client.bbs.FilmsAccessor;
 
@@ -179,7 +182,30 @@ public final class ReplayOutlineContext
 
         VertexConsumerProvider.Immediate consumers = MinecraftClient.getInstance().getBufferBuilders().getEntityVertexConsumers();
 
-        consumers.draw();
+        /* ModelFormRenderer draws cubic BBS models and BOBJ/OBJ through BBS's own
+         * immediate/VAO pipeline. It never queues their faces in Minecraft's shared
+         * entity Immediate, so flushing that unrelated buffer here only perturbs the
+         * GL state ModelFormRenderer expects on entry. On BBS 2.6 that manifested as
+         * front-face culling: only the models' inside faces remained visible, even
+         * with Iris shaders disabled. Keep the replay uniform scope, but leave the
+         * shared batch untouched for this synchronous renderer. */
+        if (renderer instanceof ModelFormRenderer)
+        {
+            set(id);
+
+            try
+            {
+                renderer.render(context);
+            }
+            finally
+            {
+                set(previous);
+            }
+
+            return;
+        }
+
+        drawPreservingCull(consumers);
         set(id);
 
         try
@@ -190,11 +216,39 @@ public final class ReplayOutlineContext
         {
             try
             {
-                consumers.draw();
+                drawPreservingCull(consumers);
             }
             finally
             {
                 set(previous);
+            }
+        }
+    }
+
+    /** A tag boundary may flush arbitrary vanilla layers. Do not let their
+     * culling phase become the input state of the BBS renderer that follows. */
+    private static void drawPreservingCull(VertexConsumerProvider.Immediate consumers)
+    {
+        boolean enabled = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+        int face = GL11.glGetInteger(GL11.GL_CULL_FACE_MODE);
+        int winding = GL11.glGetInteger(GL11.GL_FRONT_FACE);
+
+        try
+        {
+            consumers.draw();
+        }
+        finally
+        {
+            GL11.glCullFace(face);
+            GL11.glFrontFace(winding);
+
+            if (enabled)
+            {
+                RenderSystem.enableCull();
+            }
+            else
+            {
+                RenderSystem.disableCull();
             }
         }
     }

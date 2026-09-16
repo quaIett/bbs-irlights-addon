@@ -222,7 +222,118 @@ public final class VlGpuTest
             + ",\"noiseSha256\":" + quote(hash(noise)) + ",\"programs\":[" + programJson
             + "],\"comparisons\":[" + String.join(",", comparisons) + "],\"timings\":[" + String.join(",", timings) + "]}");
         if (failed != 0) throw new AssertionError(failed + " framebuffer comparisons failed; see report.json");
+        if (newSource.contains("struct IrliteProfile")) verifyProfiles(newSource,common);
         System.out.println("VL GPU verification PASS; synthetic timings are not in-game FPS: " + out.resolve("report.json"));
+    }
+
+    private void verifyProfiles(String source, Path common) throws Exception
+    {
+        final int profileOffset=16+2048*96, targetOffset=profileOffset+2048*112;
+        fixture(new Scene("mixed","unmapped",2,2,true,false,false));
+        ByteBuffer legacy=MemoryUtil.memAlloc(16+LIGHTS*96), globals=MemoryUtil.memAlloc(96);
+        ByteBuffer payload=MemoryUtil.memCalloc(targetOffset+32), single=MemoryUtil.memAlloc(112);
+        try {
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER,lightsBuffer); glGetBufferSubData(GL_SHADER_STORAGE_BUFFER,0,legacy);
+            glBindBuffer(GL_UNIFORM_BUFFER,globalsBuffer); glGetBufferSubData(GL_UNIFORM_BUFFER,0,globals);
+            payload.put(legacy.duplicate()); payload.putInt(12,0x49524C50);
+            float[] expected=new float[width*height*4];
+            for(int i=0;i<LIGHTS;i++) {
+                int p=profileOffset+i*112;
+                ByteBuffer local=globals.duplicate(); local.position(0); payload.position(p); payload.put(local);
+                payload.putFloat(p,(i%5==0)?0F:0.2F+i*0.08F);
+                payload.putFloat(p+4,(i%3==0)?7F:48F);
+                payload.putFloat(p+8,(i%2==0)?0F:2.1F);
+                payload.putFloat(p+12,.6F+i*.1F);
+                payload.putFloat(p+16,(i%2==0)?0F:.8F);
+                payload.putFloat(p+20,.6F+i*.2F);
+                payload.putFloat(p+24,(i%4)*.25F);
+                payload.putInt(p+32,16+i*3); payload.putInt(p+36,1+i%3); payload.putInt(p+40,1+i%4);
+                payload.putFloat(p+48,(i%3)*.25F); payload.putInt(p+96,1);
+                if(payload.getFloat(p)==0) continue;
+                single.clear(); single.put(legacy.duplicate().position(0).limit(16));
+                single.putInt(0,1); single.put(legacy.duplicate().position(16+i*96).limit(16+(i+1)*96)); single.flip();
+                glBindBuffer(GL_SHADER_STORAGE_BUFFER,lightsBuffer); glBufferData(GL_SHADER_STORAGE_BUFFER,single,GL_DYNAMIC_DRAW);
+                glBindBuffer(GL_UNIFORM_BUFFER,globalsBuffer);
+                glBufferData(GL_UNIFORM_BUFFER,payload.duplicate().position(p).limit(p+96),GL_DYNAMIC_DRAW);
+                float[] image=read(programs.get(0));
+                for(int j=0;j<image.length;j++) if((j&3)!=3) expected[j]+=image[j];
+            }
+            for(int j=3;j<expected.length;j+=4) expected[j]=1;
+            glBindBuffer(GL_UNIFORM_BUFFER,globalsBuffer); glBufferData(GL_UNIFORM_BUFFER,globals,GL_DYNAMIC_DRAW);
+            payload.clear(); glBindBuffer(GL_SHADER_STORAGE_BUFFER,lightsBuffer); glBufferData(GL_SHADER_STORAGE_BUFFER,payload,GL_DYNAMIC_DRAW);
+            Difference d=compare(expected,read(programs.get(1)));
+            if(d.failures!=0 || d.energy<1e-6) throw new AssertionError("Independent VL profiles: "+d);
+            // Return every source to inheritance and change the globals without recompiling.
+            for(int i=0;i<LIGHTS;i++) payload.putInt(profileOffset+i*112+96,0);
+            glBufferData(GL_SHADER_STORAGE_BUFFER,payload,GL_DYNAMIC_DRAW);
+            globals.putFloat(0,.37F); glBindBuffer(GL_UNIFORM_BUFFER,globalsBuffer); glBufferData(GL_UNIFORM_BUFFER,globals,GL_DYNAMIC_DRAW);
+            Difference inherited=compare(read(programs.get(0)),read(programs.get(1)));
+            if(inherited.failures!=0) throw new AssertionError("VL inheritance hot swap: "+inherited);
+
+            if(source.contains("irlite_matchesLightReplay")) verifyLightLinking(source,common,payload);
+            Files.writeString(out.resolve("profiles.json"),"{\"passed\":true,\"vlMixedSources\":16,\"inheritanceHotSwap\":true,\"surfaceAndSpecularIsolation\":"+source.contains("irlite_matchesLightReplay")+",\"maxVlError\":"+d.maxAbs+"}");
+            System.out.println("Profiles GPU PASS: independent VL, live inheritance and surface linking.");
+        } finally { MemoryUtil.memFree(legacy);MemoryUtil.memFree(globals);MemoryUtil.memFree(payload);MemoryUtil.memFree(single); }
+    }
+
+    private void verifyLightLinking(String source,Path common,ByteBuffer payload)throws Exception
+    {
+        final int profileOffset=16+2048*96,targetOffset=profileOffset+2048*112;
+        String functions=Files.readString(common),helpers="";
+        for(String name:List.of("min1","max0","pow2","sqrt1","sqrt3")) helpers+=extractFunction(functions,"float "+name+"(float x)")+"\n";
+        String header=HEADER.replace("#define IRLITE_VL_PASS","#define IRLITE_SURFACE_PASS")
+            +"uniform mat4 gbufferModelView,gbufferModelViewInverse;\nuniform int qaReplay; uniform bool qaSpecular;\nvec3 normal=vec3(0,0,1);\n"
+            +helpers+Files.readString(common.getParent().getParent().resolve("lighting/ggx.glsl"))+"\n";
+        String main="void main(){ uint replay=qaReplay<0?(texCoord.x<0.5?11u:22u):uint(qaReplay); vec3 diffuse,specular; irlite_lightSurface(vec3((texCoord-0.5)*4.0,8),vec3(0,0,1),vec3(0,0,-1),0.6,true,replay,diffuse,specular);resultColor=vec4(qaSpecular?specular:diffuse,1);}";
+        Program surface=program("linked-surface",header+source+main);programs.add(surface);
+        glUseProgram(surface.id);
+        float[] identity={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+        for(String matrix:List.of("gbufferModelView","gbufferModelViewInverse"))glUniformMatrix4fv(glGetUniformLocation(surface.id,matrix),false,identity);
+        glUniform1i(glGetUniformLocation(surface.id,"qaReplay"),-1);
+        payload.putInt(0,2);
+        for(int i=0;i<2;i++){
+            int l=16+i*96,p=profileOffset+i*112;
+            payload.putFloat(l,0).putFloat(l+4,0).putFloat(l+8,10).putFloat(l+12,30);
+            payload.putFloat(l+16,i==0?1:0).putFloat(l+20,i==1?1:0).putFloat(l+24,0).putFloat(l+28,1);
+            payload.putFloat(l+44,0).putFloat(l+76,-1);
+            payload.putInt(p+96,8).putInt(p+100,i).putInt(p+104,0).putInt(p+108,1);
+            payload.putInt(targetOffset+i*4,i==0?11:22);
+        }
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER,lightsBuffer);glBufferData(GL_SHADER_STORAGE_BUFFER,payload,GL_DYNAMIC_DRAW);
+        for(int specular=0;specular<=1;specular++){
+            glUseProgram(surface.id);glUniform1i(glGetUniformLocation(surface.id,"qaSpecular"),specular);
+            assertIsolation(read(surface),false,"linked "+(specular==0?"diffuse":"GGX specular"));
+        }
+        // Untagged terrain and unrelated actors receive neither diffuse nor specular.
+        for(int replay:new int[]{0,99})for(int specular=0;specular<=1;specular++){
+            glUseProgram(surface.id);glUniform1i(glGetUniformLocation(surface.id,"qaReplay"),replay);glUniform1i(glGetUniformLocation(surface.id,"qaSpecular"),specular);
+            assertBlack(read(surface),"unselected surface");
+        }
+        glUseProgram(surface.id);glUniform1i(glGetUniformLocation(surface.id,"qaReplay"),-1);
+        payload.putInt(targetOffset,22).putInt(targetOffset+4,11);glBufferData(GL_SHADER_STORAGE_BUFFER,payload,GL_DYNAMIC_DRAW);
+        assertIsolation(read(surface),true,"live selection swap");
+        for(int i=0;i<2;i++)payload.putInt(profileOffset+i*112+108,0);
+        glBufferData(GL_SHADER_STORAGE_BUFFER,payload,GL_DYNAMIC_DRAW);assertBlack(read(surface),"empty surface-light selection");
+        // One source may illuminate both selected actors at once.
+        payload.putInt(profileOffset+96,8).putInt(profileOffset+100,0).putInt(profileOffset+104,0).putInt(profileOffset+108,2);
+        payload.putInt(0,1).putInt(targetOffset,11).putInt(targetOffset+4,22);glBufferData(GL_SHADER_STORAGE_BUFFER,payload,GL_DYNAMIC_DRAW);
+        float[] multiple=read(surface);double left=0,right=0;for(int y=0;y<height;y++)for(int x=0;x<width;x++){float red=multiple[(y*width+x)*4];if(x<width/2)left+=red;else right+=red;}
+        if(left<.01||right<.01)throw new AssertionError("Multi-replay light failed");
+        System.out.println("Light linking GPU PASS: diffuse/GGX, untagged/unselected/empty, live swap and multi-selection.");
+    }
+    private void assertBlack(float[] image,String message)
+    {
+        for(int i=0;i<image.length;i++)if((i&3)!=3&&Math.abs(image[i])>1e-6)throw new AssertionError(message);
+    }
+    private void assertIsolation(float[] image,boolean swapped,String message)
+    {
+        double red=0,green=0;
+        for(int y=0;y<height;y++)for(int x=0;x<width;x++){
+            int j=(y*width+x)*4;boolean wantsRed=(x<width/2)^swapped;
+            if(wantsRed){red+=image[j];if(Math.abs(image[j+1])>1e-6)throw new AssertionError(message+": green leak");}
+            else{green+=image[j+1];if(Math.abs(image[j])>1e-6)throw new AssertionError(message+": red leak");}
+        }
+        if(red<.01||green<.01)throw new AssertionError(message+": vacuous image");
     }
 
     private Program program(String name, String source) throws Exception

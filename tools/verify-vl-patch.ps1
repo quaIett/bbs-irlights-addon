@@ -1,4 +1,4 @@
-param([string]$JavaHome = $env:JAVA_HOME)
+param([string]$JavaHome = $env:JAVA_HOME, [switch]$MainOnly)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $code = Split-Path -Parent $repo
@@ -22,6 +22,7 @@ $comboPatch = Join-Path $code 'bbs-dof-addon/patches/complementaryreimagined-irl
 $editorPatch = Join-Path $code 'irlights/src/client/resources/assets/irl-redactor/patches/complementaryreimagined.irlights'
 New-Item -ItemType Directory -Path $output | Out-Null
 foreach ($entry in @(@($mainPatch, 'main'), @($comboPatch, 'combo'))) {
+    if ($MainOnly -and $entry[1] -ne 'main') { continue }
     $log = & $java -cp $classes PatchHarness $entry[0] $original (Join-Path $output $entry[1])
     $exit = $LASTEXITCODE
     $log | Set-Content -LiteralPath (Join-Path $output ($entry[1] + '.log')) -Encoding utf8
@@ -45,21 +46,23 @@ foreach ($file in $expected) {
         throw ('Generated shader differs: ' + $relative)
     }
 }
-foreach ($relative in @('lib/irlite/irlite_lights.glsl', 'program/deferred2.glsl')) {
-    if ((ContentHash (Join-Path $mainShaders $relative)) -ne (ContentHash (Join-Path $output ('combo/shaders/' + $relative)))) {
-        throw ('Combo VL differs: ' + $relative)
+if (!$MainOnly) {
+    foreach ($relative in @('lib/irlite/irlite_lights.glsl', 'program/deferred2.glsl')) {
+        if ((ContentHash (Join-Path $mainShaders $relative)) -ne (ContentHash (Join-Path $output ('combo/shaders/' + $relative)))) {
+            throw ('Combo VL differs: ' + $relative)
+        }
     }
-}
-if ((Get-FileHash -LiteralPath $mainPatch).Hash -ne (Get-FileHash -LiteralPath $editorPatch).Hash) {
-    throw 'Bundled editor CR patch differs from addon CR patch'
+    if ((Get-FileHash -LiteralPath $mainPatch).Hash -ne (Get-FileHash -LiteralPath $editorPatch).Hash) {
+        throw 'Bundled editor CR patch differs from addon CR patch'
+    }
 }
 $result = [pscustomobject]@{
     shadersCompared = $expected.Count
     mainPatchSha256 = (Get-FileHash -LiteralPath $mainPatch).Hash
-    comboPatchSha256 = (Get-FileHash -LiteralPath $comboPatch).Hash
-    editorMatches = $true
-    comboVlMatches = $true
+    comboPatchSha256 = if (!$MainOnly) { (Get-FileHash -LiteralPath $comboPatch).Hash } else { $null }
+    editorMatches = if (!$MainOnly) { $true } else { $null }
+    comboVlMatches = if (!$MainOnly) { $true } else { $null }
     output = $output
 }
 $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $testRoot 'patch-verification.json') -Encoding utf8
-Write-Output "VL patch verification passed: $($expected.Count) shader files, main/combo apply, editor and combo VL match."
+Write-Output "VL patch verification passed: $($expected.Count) shader files; mainOnly=$MainOnly."

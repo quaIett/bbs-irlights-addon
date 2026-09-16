@@ -7,6 +7,7 @@ import mchorse.bbs_mod.utils.colors.Color;
 import org.joml.Vector3d;
 import qualet.irlite.client.light.IRLightPositionResolver;
 import org.qualet.irl.light.LightRegistry;
+import qualet.irlite.client.light.LightEffectsRegistration;
 import qualet.irlite.forms.PointLightForm;
 
 public class PointLightFormRenderer extends AbstractLightFormRenderer<PointLightForm>
@@ -48,5 +49,6 @@ public class PointLightFormRenderer extends AbstractLightFormRenderer<PointLight
             this.form.bulbSize.get(), this.form.shadows.get(),
             System.identityHashCode(this.form)
         );
+        LightEffectsRegistration.apply(this.form);
     }
 }

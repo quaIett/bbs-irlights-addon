@@ -10,6 +10,7 @@ import org.qualet.irl.light.FramePipeline;
 import org.qualet.irl.light.iris.IrisShadersState;
 import qualet.irlite.client.diag.VlProfiler;
 import qualet.irlite.client.light.LightCollector;
+import qualet.irlite.client.light.ReplayOutlineContext;
 
 @Mixin(GameRenderer.class)
 public class GameRendererLightMixin
@@ -27,6 +28,8 @@ public class GameRendererLightMixin
         // closes whichever segment is open (the tail, or the head when the
         // bake early-returned).
         VlProfiler.frameTick();
+        // Replay tags first: the light collection below resolves each light's replay lists against them.
+        ReplayOutlineContext.beginFrame();
         VlProfiler.beginPass(VlProfiler.PASS_BAKE);
         long pipelineT0 = System.nanoTime();
         try

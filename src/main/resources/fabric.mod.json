@@ -13,7 +13,8 @@
 		"fabric-datagen": ["qualet.irlite.client.IrliteDataGenerator"],
 		"client": ["qualet.irlite.client.IrliteClient"],
 		"main": ["qualet.irlite.Irlite"],
-		"bbs-addon": ["qualet.irlite.IrlightsAddon"]
+		"bbs-addon": ["qualet.irlite.IrlightsAddon"],
+		"bbs-client-addon": ["qualet.irlite.client.IrlightsClientAddon"]
 	},
 	"mixins": [
 		"irlite.mixins.json",

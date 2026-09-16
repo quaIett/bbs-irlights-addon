@@ -22,6 +22,7 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
     public UIToggle entitiesOnly;
     public UIToggle blocksOnly;
     public UIToggle shadows;
+    public LightReplayWidgets lightReplays;
 
     public UIPointLightFormPanel(UIForm editor)
     {
@@ -52,6 +53,9 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
             }
         });
         this.shadows = new UIToggle(IKey.constant("Shadows"), (b) -> this.form.shadows.set(b.getValue()));
+        // Light linking restricts diffuse and specular; Outline has its own independent list.
+        this.lightReplays = new LightReplayWidgets(this, "Light: selected replays only", "Choose lit replays...",
+            () -> this.form.effects.selectedLightReplays, () -> this.form.effects.lightReplays);
 
         // Collapsible sections need BBS's UISection (newer 2.3.x builds only). On older
         // BBS the class is absent, so fall back to a flat option list — see IrliteBbsCompat.
@@ -72,7 +76,8 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
                     this.shadows,
                     UI.label(IKey.constant("Bulb size (shadow softness)")), this.bulbSize
                 ),
-                IrliteFormSections.spaced("Affects", this.entitiesOnly, this.blocksOnly)
+                IrliteFormSections.spaced("Affects", this.entitiesOnly, this.blocksOnly,
+                    this.lightReplays.elements()[0], this.lightReplays.elements()[1], this.lightReplays.elements()[2])
             );
         }
         else
@@ -87,6 +92,7 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
             this.options.add(this.entitiesOnly);
             this.options.add(this.blocksOnly);
             this.options.add(this.shadows);
+            this.options.add(this.lightReplays.elements());
         }
     }
 
@@ -105,5 +111,6 @@ public class UIPointLightFormPanel extends UIFormPanel<PointLightForm>
         this.entitiesOnly.setValue(form.entitiesOnly.get());
         this.blocksOnly.setValue(form.blocksOnly.get());
         this.shadows.setValue(form.shadows.get());
+        this.lightReplays.refresh();
     }
 }

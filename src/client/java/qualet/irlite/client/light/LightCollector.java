@@ -1,6 +1,5 @@
 package qualet.irlite.client.light;
 
-import io.netty.util.collection.IntObjectMap;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.blocks.entities.ModelProperties;
@@ -39,6 +38,7 @@ import org.qualet.irl.light.VlGlobalsBuffer;
 
 import qualet.irlite.IrliteConfig;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -53,6 +53,33 @@ public final class LightCollector
     /** Shared camera-space horizon for lights and the casters that may shadow them. */
     public static final double MAX_DIST = 256.0;
     private static final double MAX_DIST_SQ = MAX_DIST * MAX_DIST;
+    private static final ThreadLocal<TraversalScratch> SCRATCH = ThreadLocal.withInitial(TraversalScratch::new);
+
+    /** Storage only: every matrix/vector is overwritten from current form values.
+     *  A stack keeps parents and siblings separate and also permits a nested
+     *  collection from BBS callbacks. No form, world or pose is retained here. */
+    static final class TraversalScratch
+    {
+        private final List<ScratchFrame> frames = new ArrayList<>();
+        private int depth;
+
+        int mark() { return depth; }
+        ScratchFrame push()
+        {
+            if (depth == frames.size()) frames.add(new ScratchFrame());
+            return frames.get(depth++);
+        }
+        void rewind(int mark) { depth = mark; }
+    }
+
+    static final class ScratchFrame
+    {
+        final Matrix4f local = new Matrix4f();
+        final Matrix4f transform = new Matrix4f();
+        final Matrix4f child = new Matrix4f();
+        final Vector4f origin = new Vector4f();
+        final Vector4f forward = new Vector4f();
+    }
 
     /** VL depth-aware bilateral upsample (UBO flags bit6): always on, no UI knob —
      *  at IRLITE_VL_RESOLUTION 1.0 it converges to plain bilinear, below 1.0 it is
@@ -173,10 +200,20 @@ public final class LightCollector
             IrliteConfig.outlinePixelSize()
         );
         VlGlobalsBuffer.setShadow(IrliteConfig.shadowsLive(), IrliteConfig.shadowSoftness());
+        VlGlobalsBuffer.setSurface(
+            IrliteConfig.diffuse(),
+            IrliteConfig.intensity(),
+            IrliteConfig.specular(),
+            IrliteConfig.specularIntensity(),
+            IrliteConfig.toon(),
+            IrliteConfig.toonBands(),
+            IrliteConfig.toonSmooth()
+        );
         // Dev VL profiler sweep (-Dirlite.profileVl=true): may re-issue the push
         // above with per-config flag overrides — last write wins before upload.
         // New VlGlobalsBuffer.set args must be mirrored in VlSweep.overrideVlGlobals.
-        // setOutline is NOT mirrored there by design — the sweep only varies VL.
+        // setOutline/setShadow/setSurface are NOT mirrored there by design — the
+        // sweep only varies VL, and their flag words are separate from set()'s.
         VlProfiler.overrideVlGlobals();
 
         if (world == null || cameraPos == null)
@@ -184,11 +221,12 @@ public final class LightCollector
             return;
         }
 
-        scanBlockEntities(world, cameraPos);
-        scanFilmReplays(cameraPos, tickDelta);
+        TraversalScratch scratch = SCRATCH.get();
+        scanBlockEntities(world, cameraPos, tickDelta, scratch);
+        scanFilmReplays(cameraPos, tickDelta, scratch);
     }
 
-    private static void scanBlockEntities(ClientWorld world, Vec3d cameraPos)
+    private static void scanBlockEntities(ClientWorld world, Vec3d cameraPos, float tickDelta, TraversalScratch scratch)
     {
         List<BlockEntityTickInvoker> tickers;
         try
@@ -252,89 +290,133 @@ public final class LightCollector
             // build the form tree RELATIVE to the block cell and carry the block's
             // world position as a double base, added back only at emit. At X=100000 a
             // float matrix would quantize the position to ~8 mm; a double base does not.
-            Matrix4f root = new Matrix4f().identity();
-            root.translate(0.5F, 0F, 0.5F);
-            Transform propsT = props.getTransform();
-            if (propsT != null)
+            int mark = scratch.mark();
+            try
             {
-                Matrix4f propsM = new Matrix4f();
-                propsT.setupMatrix(propsM);
-                root.mul(propsM);
-            }
+                ScratchFrame frame = scratch.push();
+                Matrix4f root = frame.local.identity();
+                root.translate(0.5F, 0F, 0.5F);
+                Transform propsT = props.getTransform();
+                if (propsT != null)
+                {
+                    propsT.setupMatrix(frame.transform.identity());
+                    root.mul(frame.transform);
+                }
 
-            walk(rootForm, root, pos.getX(), pos.getY(), pos.getZ());
+                walk(rootForm, root, pos.getX(), pos.getY(), pos.getZ(), tickDelta, scratch);
+            }
+            finally
+            {
+                scratch.rewind(mark);
+            }
         }
     }
 
     /** {@code base[XYZ]} is the form tree's world origin, carried in double so a far-
      *  from-origin coordinate never enters the float {@code parent} matrix; it is added
      *  back to the matrix-local offset at emit. The matrix therefore only ever holds
-     *  small, block-local (or actor-local) values. */
-    private static void walk(Form form, Matrix4f parent, double baseX, double baseY, double baseZ)
+     *  small, block-local (or actor-local) values.
+     *
+     *  {@code transition} is the frame's partial tick, forwarded into
+     *  {@link Form#applyStates} so a form's animation states drive the light exactly
+     *  as they drive the visible render. */
+    private static void walk(Form form, Matrix4f parent, double baseX, double baseY, double baseZ, float transition,
+                             TraversalScratch scratch)
     {
-        if (form == null || !form.visible.get())
+        if (form == null)
         {
             return;
         }
 
-        Matrix4f local = new Matrix4f(parent);
-        Transform t = form.transform.get();
-        if (t != null)
+        // Overlay this form's animation states before reading its transform, exactly
+        // as FormRenderer.render() does (applyStates -> read transforms + walk the
+        // subtree -> unapplyStates). BBS lays an animation frame onto a form's Value
+        // fields (transform, visible, ...) as a transient runtime override that lives
+        // ONLY inside that render window; the scanner runs at renderWorld HEAD, wholly
+        // outside it, so without this it would read the static base pose and a
+        // ModelBlock-placed light would never follow its form's animation. No-op for
+        // a form with no active state players. unapplyStates() sits in finally so the
+        // pair stays balanced (including the early returns below), leaving a clean
+        // base for the later real render to re-apply from. States are re-applied per
+        // form on the recursion, matching the render's per-form apply nesting.
+        form.applyStates(transition);
+        int mark = scratch.mark();
+        try
         {
-            Matrix4f tm = new Matrix4f();
-            t.setupMatrix(tm);
-            local.mul(tm);
-        }
-
-        if (form instanceof PointLightForm point)
-        {
-            emitPoint(point, local, baseX, baseY, baseZ);
-        }
-        else if (form instanceof SpotlightForm spot)
-        {
-            emitSpot(spot, local, baseX, baseY, baseZ);
-        }
-
-        if (form.parts == null)
-        {
-            return;
-        }
-        List<BodyPart> parts = form.parts.getAllTyped();
-        if (parts == null)
-        {
-            return;
-        }
-
-        for (int i = 0, n = parts.size(); i < n; i++)
-        {
-            BodyPart part = parts.get(i);
-            if (part == null)
+            if (!form.visible.get())
             {
-                continue;
+                return;
             }
 
-            String bone = part.bone.get();
-            if (bone != null && !bone.isEmpty())
+            ScratchFrame frame = scratch.push();
+            Matrix4f local = frame.local.set(parent);
+            Transform t = form.transform.get();
+            if (t != null)
             {
-                continue;
+                t.setupMatrix(frame.transform.identity());
+                local.mul(frame.transform);
             }
 
-            Form child = part.getForm();
-            if (child == null)
+            if (form instanceof PointLightForm point)
             {
-                continue;
+                emitPoint(point, local, baseX, baseY, baseZ, frame.origin);
+            }
+            else if (form instanceof SpotlightForm spot)
+            {
+                emitSpot(spot, local, baseX, baseY, baseZ, frame.origin, frame.forward);
             }
 
-            Matrix4f childM = new Matrix4f(local);
-            Transform pt = part.transform.get();
-            if (pt != null)
+            if (form.parts == null)
             {
-                Matrix4f ptm = new Matrix4f();
-                pt.setupMatrix(ptm);
-                childM.mul(ptm);
+                return;
+            }
+            List<BodyPart> parts = form.parts.getAllTyped();
+            if (parts == null)
+            {
+                return;
             }
 
-            walk(child, childM, baseX, baseY, baseZ);
+            for (int i = 0, n = parts.size(); i < n; i++)
+            {
+                BodyPart part = parts.get(i);
+                if (part == null)
+                {
+                    continue;
+                }
+
+                String bone = part.bone.get();
+                if (bone != null && !bone.isEmpty())
+                {
+                    continue;
+                }
+
+                Form child = part.getForm();
+                if (child == null)
+                {
+                    continue;
+                }
+
+                Matrix4f childM = frame.child.set(local);
+                Transform pt = part.transform.get();
+                if (pt != null)
+                {
+                    pt.setupMatrix(frame.transform.identity());
+                    childM.mul(frame.transform);
+                }
+
+                walk(child, childM, baseX, baseY, baseZ, transition, scratch);
+            }
+        }
+        finally
+        {
+            try
+            {
+                form.unapplyStates();
+            }
+            finally
+            {
+                scratch.rewind(mark);
+            }
         }
     }
 
@@ -345,7 +427,7 @@ public final class LightCollector
      * the form-renderer path, where the rig pose is available. Gated on the
      * dashboard being open so we never light a viewport that isn't showing.
      */
-    private static void scanFilmReplays(Vec3d cameraPos, float tickDelta)
+    private static void scanFilmReplays(Vec3d cameraPos, float tickDelta, TraversalScratch scratch)
     {
         FilmEditorController editor = getActiveEditorController();
         if (editor == null || editor.film == null || editor.film.replays == null)
@@ -359,21 +441,17 @@ public final class LightCollector
             return;
         }
 
-        for (IntObjectMap.PrimitiveEntry<IEntity> entry : editor.getEntities().entries())
+        // BBS 2.6 keys the film's entities by the replay's stable id, not its list index.
+        java.util.Map<String, IEntity> entities = editor.getEntities();
+        for (int replayId = 0; replayId < replays.size(); replayId++)
         {
-            int replayId = entry.key();
-            if (replayId < 0 || replayId >= replays.size())
-            {
-                continue;
-            }
-
             Replay replay = replays.get(replayId);
             if (replay == null || replay.actor.get())
             {
                 continue;
             }
 
-            IEntity ent = entry.value();
+            IEntity ent = entities.get(replay.getId());
             if (ent == null)
             {
                 continue;
@@ -401,14 +479,21 @@ public final class LightCollector
             // (kept out of the float matrix so it stays precise far from origin). The base
             // is added AFTER the rotation at emit, reproducing the old translate*rotate.
             float bodyYaw = MathHelper.lerp(tickDelta, ent.getPrevBodyYaw(), ent.getBodyYaw());
-            Matrix4f root = new Matrix4f().identity();
-            root.rotateY((float) Math.toRadians(-bodyYaw));
-
-            walk(rootForm, root, wx, wy, wz);
+            int mark = scratch.mark();
+            try
+            {
+                Matrix4f root = scratch.push().local.identity();
+                root.rotateY((float) Math.toRadians(-bodyYaw));
+                walk(rootForm, root, wx, wy, wz, tickDelta, scratch);
+            }
+            finally
+            {
+                scratch.rewind(mark);
+            }
         }
     }
 
-    private static FilmEditorController getActiveEditorController()
+    public static FilmEditorController getActiveEditorController()
     {
         try
         {
@@ -433,25 +518,25 @@ public final class LightCollector
         }
     }
 
-    private static void emitPoint(PointLightForm form, Matrix4f matrix, double baseX, double baseY, double baseZ)
+    private static void emitPoint(PointLightForm form, Matrix4f matrix, double baseX, double baseY, double baseZ,
+                                  Vector4f origin)
     {
-        Vector4f origin = new Vector4f(0F, 0F, 0F, 1F);
-        matrix.transform(origin);
+        matrix.transform(origin.set(0F, 0F, 0F, 1F));
 
         // origin is the small matrix-local offset; add the double base back to recover
         // the absolute world position without the far-from-origin float quantization.
         Color c = form.color.get();
         LightRegistry.registerPoint(baseX + origin.x, baseY + origin.y, baseZ + origin.z, c.r, c.g, c.b, form.intensity.get(), form.radius.get(), form.entitiesOnly.get(), form.blocksOnly.get(), form.anisotropy.get(), form.vlDensity.get(), form.beamStrength.get(), form.bulbSize.get(), form.shadows.get(), System.identityHashCode(form));
+        LightEffectsRegistration.apply(form);
     }
 
-    private static void emitSpot(SpotlightForm form, Matrix4f matrix, double baseX, double baseY, double baseZ)
+    private static void emitSpot(SpotlightForm form, Matrix4f matrix, double baseX, double baseY, double baseZ,
+                                 Vector4f origin, Vector4f forward)
     {
-        Vector4f origin = new Vector4f(0F, 0F, 0F, 1F);
-        matrix.transform(origin);
+        matrix.transform(origin.set(0F, 0F, 0F, 1F));
 
         // Local +Z = the direction the spotlight points (matches the editor gizmo).
-        Vector4f forward = new Vector4f(0F, 0F, 1F, 0F);
-        matrix.transform(forward);
+        matrix.transform(forward.set(0F, 0F, 1F, 0F));
         LightMath.normalizeDir(forward.x, forward.y, forward.z, 0F, 0F, 1F, forward);
         float dx = forward.x, dy = forward.y, dz = forward.z;
 
@@ -471,5 +556,6 @@ public final class LightCollector
         // added back to recover the absolute world position without float quantization.
         Color c = form.color.get();
         LightRegistry.registerSpot(baseX + origin.x, baseY + origin.y, baseZ + origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, form.entitiesOnly.get(), form.blocksOnly.get(), form.anisotropy.get(), form.vlDensity.get(), form.beamStrength.get(), form.bulbSize.get(), form.shadows.get(), (float) cookieLayer, cookieRot, form.cookieScale.get(), cookieFlags, System.identityHashCode(form));
+        LightEffectsRegistration.apply(form);
     }
 }

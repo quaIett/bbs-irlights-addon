@@ -24,6 +24,9 @@ public class L10nMixin
         self.getKey("irlights.config.presets.title", "Presets");
         self.getKey("irlights.config.presets.tooltip", "Quality and beam style presets, plus the knobs worth having on their own");
 
+        self.getKey("irlights.config.lighting.title", "Lighting");
+        self.getKey("irlights.config.lighting.tooltip", "Light IRLights lights put on surfaces: brightness, specular highlights and toon banding");
+
         self.getKey("irlights.config.volumetric.title", "Volumetric");
         self.getKey("irlights.config.volumetric.tooltip", "Beams and haze: march cost, shadowing and the animated noise");
 
@@ -93,6 +96,9 @@ public class L10nMixin
         self.getKey("irlights.config.shadows.shadows_live", "Light shadows");
         self.getKey("irlights.config.shadows.shadows_live-comment", "Cast shadows from IRLights lights. Applies instantly every frame without reloading the shaderpack. With this off (and beam shadows off too) the mod also stops baking the shadow maps, so it recovers the bake cost and VRAM, not just the on-screen shadows. This is the everyday on/off — the shaderpack also has its own IRLITE_SHADOWS option, but that one is a compatibility escape hatch that strips the shadow code out of the compiled shader. Only affects shaderpacks patched with runtime globals.");
 
+        self.getKey("irlights.config.shadows.shadow_partial_tile", "Partial shadow updates");
+        self.getKey("irlights.config.shadows.shadow_partial_tile-comment", "Speed-up for moving subjects near spot lights: each frame only the subject's projected rectangle of the shadow map is redrawn and refiltered instead of the whole tile. The rectangle is sized from hitboxes, so a form drawn much bigger than its hitbox can get its shadow edge cut at the rectangle border, shifting as the subject moves. Switch OFF while filming oversized forms; the cost is a full-tile update every frame per spot with a moving subject.");
+
         self.getKey("irlights.config.shadows.shadow_softness", "Softness");
         self.getKey("irlights.config.shadows.shadow_softness-comment", "Apparent size of the light source, which sets how fast the shadow edge spreads with distance from whatever casts it — contact stays sharp, far shadows go soft. 0 gives hard edges everywhere. A light with its own bulb size set ignores this and uses that. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
 
@@ -125,5 +131,26 @@ public class L10nMixin
 
         self.getKey("irlights.config.outline.outline_glow_strength", "Glow strength");
         self.getKey("irlights.config.outline.outline_glow_strength-comment", "Strength of the inner glow halo. Only used while Inner glow is on — switching that off keeps this value for when you come back. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.diffuse", "Diffuse lighting");
+        self.getKey("irlights.config.lighting.diffuse-comment", "Light from IRLights lights on surfaces. Off leaves only the specular highlight (if that is on), the outline and the volumetric beams. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.intensity", "Intensity");
+        self.getKey("irlights.config.lighting.intensity-comment", "Brightness multiplier for everything IRLights lights put on surfaces: diffuse light, specular highlights and the outline rim. The volumetric beams have their own VL intensity. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.specular", "Specular highlights");
+        self.getKey("irlights.config.lighting.specular-comment", "Shiny highlights from IRLights lights, using the shaderpack's own specular model. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.specular_intensity", "Specular intensity");
+        self.getKey("irlights.config.lighting.specular_intensity-comment", "Multiplier for the specular highlight alone, on top of Intensity. 0 hides the highlight but still pays for it — switch Specular highlights off to skip the work. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.toon", "Toon shading");
+        self.getKey("irlights.config.lighting.toon-comment", "Quantize the diffuse light from IRLights lights into flat bands (cel shading). Off by default. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.toon_bands", "Bands");
+        self.getKey("irlights.config.lighting.toon_bands-comment", "Number of brightness bands while Toon shading is on. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
+
+        self.getKey("irlights.config.lighting.toon_smooth", "Band smoothing");
+        self.getKey("irlights.config.lighting.toon_smooth-comment", "How soft the edge between two toon bands is. 0 = hard steps. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime globals.");
     }
 }

@@ -8,6 +8,7 @@ import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIToggle;
 import mchorse.bbs_mod.ui.framework.elements.input.list.UILabelList;
 import mchorse.bbs_mod.ui.framework.elements.utils.UILabel;
+import mchorse.bbs_mod.ui.framework.elements.utils.UIText;
 import mchorse.bbs_mod.ui.utils.UI;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Colors;
@@ -43,8 +44,12 @@ public final class UIPatcherSection
     private static String status = "Select a shaderpack and a patch for it.";
     private static int statusColor = Colors.WHITE;
 
-    private static UILabel metaLabel;
-    private static UILabel statusLabel;
+    // UIText (not UILabel): both wrap onto multiple lines instead of truncating with
+    // "..." at the panel edge. A failed-patch status is a full sentence, and the meta
+    // line carries the target shaderpack name — cutting either off soft-locks the user
+    // (they can't see what went wrong or which pack the patch actually needs).
+    private static UIText metaLabel;
+    private static UIText statusLabel;
     private static Runnable rebuild;
 
     private UIPatcherSection()
@@ -119,8 +124,7 @@ public final class UIPatcherSection
         options.add(patchList);
 
         // --- selected-patch meta (which shaderpack it's for + match state) ---
-        metaLabel = new UILabel(IKey.constant(""), META_COLOR);
-        metaLabel.h(28);
+        metaLabel = new UIText(IKey.constant("")).color(META_COLOR, true);
         options.add(metaLabel);
         updateMeta(packList);
 
@@ -134,8 +138,7 @@ public final class UIPatcherSection
         UIButton patch = new UIButton(IKey.constant("Patch"), (b) -> runPatch());
         options.add(UI.row(validate, patch));
 
-        statusLabel = new UILabel(IKey.constant(status), statusColor);
-        statusLabel.h(28);
+        statusLabel = new UIText(IKey.constant(status)).color(statusColor, true);
         options.add(statusLabel);
     }
 
@@ -312,7 +315,7 @@ public final class UIPatcherSection
     {
         if (metaLabel != null)
         {
-            metaLabel.label = IKey.constant(message);
+            metaLabel.text(IKey.constant(message));
             metaLabel.color(color, true);
         }
     }
@@ -323,7 +326,7 @@ public final class UIPatcherSection
         statusColor = ok ? OK_COLOR : ERR_COLOR;
         if (statusLabel != null)
         {
-            statusLabel.label = IKey.constant(message);
+            statusLabel.text(IKey.constant(message));
             statusLabel.color(statusColor, true);
         }
     }

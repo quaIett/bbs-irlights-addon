@@ -5,7 +5,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.joml.Matrix4f;
 import org.qualet.irl.light.FramePipeline;
 
 /**
@@ -31,6 +30,6 @@ public class CapturedRenderingStateClusterMixin
     private void irlite$captureGbufferMatrices(CallbackInfo ci)
     {
         CapturedRenderingState state = CapturedRenderingState.INSTANCE;
-        FramePipeline.onGbufferMatricesCaptured(new Matrix4f(state.getGbufferModelView()), new Matrix4f(state.getGbufferProjection()));
+        FramePipeline.onGbufferMatricesCaptured(new org.joml.Matrix4f(state.getGbufferModelView()), new org.joml.Matrix4f(state.getGbufferProjection()));
     }
 }

@@ -1,5 +1,6 @@
 package qualet.irlite.client.forms;
 
+import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.camera.Camera;
 import mchorse.bbs_mod.camera.CameraUtils;
@@ -174,7 +175,9 @@ public final class SpotGuideDrag
         };
 
         String key = FormUtils.getPropertyPath(property);
-        KeyframeChannel channel = key == null ? null : replay.properties.properties.get(key);
+        // BBS 2.6 addresses tracks by TrackId; this is FormProperties' own lookup.
+        TrackId track = key == null ? null : TrackId.parse(key);
+        KeyframeChannel channel = track == null ? null : replay.properties.get(track);
 
         if (channel == null || channel.isEmpty())
         {
@@ -462,14 +465,11 @@ public final class SpotGuideDrag
     }
 
     /**
-     * True only while the REPLAY editor is the active film editor — the sole film
-     * context where the spotlight guides and grab handles are allowed. In the
-     * camera editor the same replay stays selected (so BBS keeps picking it), but
-     * the guides must stay hidden and non-grabbable there.
-     *
-     * 1.21.1: BBS 2.2.1-1.21.1 has no actions-mode (the ReplayCategory enum is
-     * PLAYER/MODEL/POSE, no ACTIONS timeline and no isActionsMode()), so the
-     * actions-mode sub-guard master uses on BBS 2.3.1 is dropped here.
+     * True only while the REPLAY editor is the active film editor and it isn't in
+     * actions mode — the sole film context where the spotlight guides and grab
+     * handles are allowed. In the camera editor, or the replay editor's actions
+     * timeline, the same replay stays selected (so BBS keeps picking it), but the
+     * guides must stay hidden and non-grabbable there.
      */
     public static boolean isReplayEditorActive()
     {
@@ -477,7 +477,8 @@ public final class SpotGuideDrag
 
         return film != null
             && film.replayEditor != null
-            && film.replayEditor.isVisible();
+            && film.replayEditor.isVisible()
+            && !film.replayEditor.isActionsMode();
     }
 
     public static boolean isHandle(String bone)

@@ -4,9 +4,9 @@ import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.data.DataToString;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.MapType;
-import mchorse.bbs_mod.events.BBSAddonMod;
-import mchorse.bbs_mod.events.Subscribe;
-import mchorse.bbs_mod.events.register.RegisterSettingsEvent;
+import mchorse.bbs_mod.api.BBSAddonMod;
+import mchorse.bbs_mod.api.Subscribe;
+import mchorse.bbs_mod.api.events.RegisterSettingsEvent;
 import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.settings.SettingsBuilder;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
@@ -42,6 +42,17 @@ public class IrlightsAddon implements BBSAddonMod
         IrliteConfig.maxShaderLights = builder.getInt("max_shader_lights", old.getInt("max_shader_lights", 0), 0, 2048);
         IrliteConfig.showGuides = builder.getBoolean("show_guides", old.getBool("show_guides", false));
 
+        // Wave 2 (2026-09-15): the surface half of the former Iris screen —
+        // diffuse/specular/toon and their numbers now ride the globals UBO.
+        builder.category("lighting", Icons.MATERIAL);
+        IrliteConfig.diffuse = builder.getBoolean("diffuse", old.getBool("diffuse", true));
+        IrliteConfig.intensity = builder.getFloat("intensity", old.getFloat("intensity", 1F), 0F, 4F);
+        IrliteConfig.specular = builder.getBoolean("specular", old.getBool("specular", true));
+        IrliteConfig.specularIntensity = builder.getFloat("specular_intensity", old.getFloat("specular_intensity", 1F), 0F, 4F);
+        IrliteConfig.toon = builder.getBoolean("toon", old.getBool("toon", false));
+        IrliteConfig.toonBands = builder.getInt("toon_bands", old.getInt("toon_bands", 3), 2, 8);
+        IrliteConfig.toonSmooth = builder.getFloat("toon_smooth", old.getFloat("toon_smooth", 0.10F), 0F, 0.5F);
+
         builder.category("volumetric", Icons.SUN);
         IrliteConfig.vlSteps = builder.getInt("vl_steps", old.getInt("vl_steps", 48), 8, 64);
         IrliteConfig.vlMaxDist = builder.getFloat("vl_max_dist", old.getFloat("vl_max_dist", 96F), 32F, 256F);
@@ -72,6 +83,7 @@ public class IrlightsAddon implements BBSAddonMod
         // constants now, baked into the pack.
         IrliteConfig.shadowsLive = builder.getBoolean("shadows_live", old.getBool("shadows_live", true));
         IrliteConfig.shadowSoftness = builder.getFloat("shadow_softness", old.getFloat("shadow_softness", 0.10F), 0F, 0.8F);
+        IrliteConfig.shadowPartialTile = builder.getBoolean("shadow_partial_tile", old.getBool("shadow_partial_tile", true));
 
         // Wave 1 (2026-07-21): these ten used to be Iris-screen #defines, each
         // costing a shaderpack recompile. They now ride the globals UBO, so they

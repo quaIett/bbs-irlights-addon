@@ -201,10 +201,8 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
         BBSModClient.getTextures().bindTexture(icon.texture);
         RenderSystem.setShader(GameRenderer::getPositionTexColorProgram);
 
-        // 1.21: begin() moved to Tessellator and returns the builder; per-vertex
-        // .next() is gone (vertex(...) auto-advances). Mirrors LightGuideRenderer.
-        BufferBuilder builder = Tessellator.getInstance()
-            .begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_TEXTURE_COLOR);
+
+        BufferBuilder builder = Tessellator.getInstance().begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_TEXTURE_COLOR);
 
         /* Alpha forced to 1 — a light with a translucent colour must still show
          * a solid icon rather than a faint/invisible one. */

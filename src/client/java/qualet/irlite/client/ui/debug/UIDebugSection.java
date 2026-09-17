@@ -10,11 +10,22 @@ import qualet.irlite.client.diag.VlProfiler;
 /** Debug controls rendered at the bottom of the IRLights presets section. */
 public final class UIDebugSection
 {
+    /** Debug UI is hidden by default. Opt back in with {@code -Dirlite.debug=true}
+     *  — the profiler itself and its {@code -Dirlite.profileVl} boot switch are
+     *  untouched; this gate only decides whether the settings button is surfaced.
+     *  Kept (not deleted) so the section returns with a single flag. */
+    private static final boolean DEBUG_UI = Boolean.getBoolean("irlite.debug");
+
     private UIDebugSection()
     {}
 
     public static void append(UIScrollView options, Runnable rebuild)
     {
+        if (!DEBUG_UI)
+        {
+            return;
+        }
+
         UILabel header = UI.label(IKey.constant("Debug"));
         header.marginTop(6);
         options.add(header);

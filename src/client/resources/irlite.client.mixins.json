@@ -22,6 +22,7 @@
     "bbs.MobFormRendererAccessor",
     "bbs.ReplayCategoryInvoker",
     "bbs.ReplayCategoryMixin",
+    "bbs.ReplaySelectionTrackMixin",
     "bbs.TextureShadowRevisionMixin",
     "bbs.WorldBlockEntityTickersAccessor",
     "iris.CapturedRenderingStateClusterMixin",

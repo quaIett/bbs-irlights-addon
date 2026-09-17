@@ -40,24 +40,37 @@ public final class LightEffectsRegistration
     private static final class Targets
     {
         private String value;
+        private String original;
+        private boolean automatic;
         private String film = "";
         private String[] replays = new String[0];
         private int[] resolved = new int[0];
 
-        int[] resolve(ValueReplaySelection property)
+        void read(ValueReplaySelection property)
         {
             String now = property.get();
+            String base = property.getOriginalValue();
 
-            if (!Objects.equals(now, this.value))
+            if (!Objects.equals(now, this.value) || !Objects.equals(base, this.original))
             {
                 ReplaySelection.Selection selection = ReplaySelection.decode(now);
 
+                if (selection.mode() == ReplaySelection.Mode.INHERIT)
+                {
+                    selection = ReplaySelection.decode(base);
+                }
+
                 this.value = now;
+                this.original = base;
+                this.automatic = selection.mode() == ReplaySelection.Mode.SELECTED;
                 this.film = selection.film();
                 this.replays = selection.replays().toArray(new String[0]);
                 this.resolved = new int[this.replays.length];
             }
+        }
 
+        int[] resolve()
+        {
             for (int i = 0; i < this.replays.length; i++)
             {
                 this.resolved[i] = ReplayOutlineContext.resolve(this.film, this.replays[i]);
@@ -72,7 +85,7 @@ public final class LightEffectsRegistration
         LightEffects e = form.effects;
         long id = System.identityHashCode(form);
 
-        if (e.isDefault())
+        if (e.isDefault() && e.outlineReplays.get().isEmpty() && e.lightReplays.get().isEmpty())
         {
             LightRegistry.setProfile(id, null);
 
@@ -82,13 +95,22 @@ public final class LightEffectsRegistration
         Cache cache = form.renderCache() instanceof Cache c ? c : new Cache();
 
         form.setRenderCache(cache);
+        cache.outline.read(e.outlineReplays);
+        cache.light.read(e.lightReplays);
+
+        if (e.isDefault() && !cache.outline.automatic && !cache.light.automatic)
+        {
+            LightRegistry.setProfile(id, null);
+
+            return;
+        }
 
         LightProfile p = cache.profile;
 
         p.customVl = e.customVl.get();
-        p.customOutline = e.customOutline.get();
-        p.selectedReplays = e.selectedReplays.get();
-        p.selectedLightReplays = e.selectedLightReplays.get();
+        p.customOutline = cache.outline.automatic || e.customOutline.get();
+        p.selectedReplays = cache.outline.automatic || e.selectedReplays.get();
+        p.selectedLightReplays = cache.light.automatic || e.selectedLightReplays.get();
 
         /* Volumetric: the look knobs are the light's own, the cost knobs stay global. */
         p.intensity = e.vlEnabled.get() ? e.vlIntensity.get() : 0F;
@@ -107,10 +129,11 @@ public final class LightEffectsRegistration
          * bit9 front rim, bit10 glow, bits 11-12 target. */
         p.flags = (e.vlShadows.get() ? 1 : 0)
             | (e.vlNoise.get() ? 2 : 0)
-            | (e.outline.get() ? 256 : 0)
+            | (cache.outline.automatic || e.outline.get() ? 256 : 0)
             | (e.outlineFront.get() ? 512 : 0)
             | (e.outlineGlow.get() ? 1024 : 0)
-            | (e.outlineTarget.get() << 11);
+            /* The replay list is the target in automatic mode, including BlockForms. */
+            | ((cache.outline.automatic ? 0 : e.outlineTarget.get()) << 11);
 
         p.strength = e.outlineStrength.get();
         p.fresnel = e.outlineFresnel.get();
@@ -119,8 +142,8 @@ public final class LightEffectsRegistration
         p.glow = e.outlineGlowStrength.get();
         p.pixelSize = IrliteConfig.outlinePixelSize();
 
-        p.replayIds = cache.outline.resolve(e.outlineReplays);
-        p.lightReplayIds = cache.light.resolve(e.lightReplays);
+        p.replayIds = cache.outline.resolve();
+        p.lightReplayIds = cache.light.resolve();
 
         LightRegistry.setProfile(id, p);
     }

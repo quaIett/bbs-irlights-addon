@@ -1,6 +1,6 @@
 param(
     [string]$JavaHome = $env:JAVA_HOME,
-    [ValidateSet('1.20.1', '1.20.4')][string]$MinecraftVersion = '1.20.4'
+    [ValidateSet('1.20.1', '1.20.4', '1.21.1', '1.21.11')][string]$MinecraftVersion = '1.20.4'
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -32,7 +32,7 @@ $fixturePath = Join-Path $boundary 'BBSMod.java'
 [IO.File]::WriteAllText($fixturePath, $fixture)
 $classpath = [IO.File]::ReadAllText((Join-Path $output 'classpath.txt')).Replace('\', '/')
 $compileArgs = @('--release', '17', '-encoding', 'UTF-8', '-proc:none', '-cp', ('"' + $classpath + '"'), '-d', ('"' + $classes.Replace('\', '/') + '"'))
-$compileArgs += @($fixturePath, (Join-Path $PSScriptRoot 'profiles/ProfilesBbsTest.java')) | ForEach-Object { '"' + $_.Replace('\', '/') + '"' }
+$compileArgs += @($fixturePath, (Join-Path $PSScriptRoot 'profiles/ProfilesBbsTest.java'), (Join-Path $PSScriptRoot 'profiles/ReplayPortApiCheck.java')) | ForEach-Object { '"' + $_.Replace('\', '/') + '"' }
 $argFile = Join-Path $output 'compile.args'
 [IO.File]::WriteAllLines($argFile, $compileArgs)
 & (Join-Path $JavaHome 'bin/javac.exe') "@$argFile"
@@ -44,3 +44,8 @@ try {
     & (Join-Path $JavaHome 'bin/java.exe') "@$runFile"
     if ($LASTEXITCODE -ne 0) { throw 'BBS profiles production checks failed' }
 } finally { Pop-Location }
+
+$apiArgs = Join-Path $output 'api.args'
+[IO.File]::WriteAllLines($apiArgs, @('-cp', ('"' + $classes.Replace('\', '/') + ';' + $classpath + '"'), 'ReplayPortApiCheck', $MinecraftVersion, ('"' + (Join-Path $output 'api-report.json').Replace('\', '/') + '"')))
+& (Join-Path $JavaHome 'bin/java.exe') "@$apiArgs"
+if ($LASTEXITCODE -ne 0) { throw "Replay port bytecode anchor checks failed" }

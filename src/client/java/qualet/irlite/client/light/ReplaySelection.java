@@ -23,15 +23,20 @@ import java.util.Set;
  * replays being reordered or removed around it. The picker still shows list positions,
  * because that is how an animator counts actors.</p>
  *
- * <p>Wire format: {@code {"film":"<id>","replays":["<id>",...]}}. Anything unparsable
+ * <p>Wire format: {@code {"film":"<id>","replays":["<id>",...],"mode":"selected"}}.
+ * New keys use selected (automatic activation) or inherit (the form's saved settings).
+ * A missing mode preserves the old form-switch semantics. Anything unparsable
  * decodes to an empty selection of no film, which "enabled + empty = nobody" then
  * renders as: the light touches no replay at all rather than everyone.</p>
  */
 public final class ReplaySelection
 {
-    public record Selection(String film, Set<String> replays)
+    /** Missing mode is the original format, whose switches still live on the form. */
+    public enum Mode { LEGACY, SELECTED, INHERIT }
+
+    public record Selection(String film, Set<String> replays, Mode mode)
     {
-        public static final Selection EMPTY = new Selection("", Set.of());
+        public static final Selection EMPTY = new Selection("", Set.of(), Mode.LEGACY);
 
         public boolean isEmpty()
         {
@@ -87,7 +92,12 @@ public final class ReplaySelection
 
             JsonElement film = json.get("film");
 
-            return new Selection(film == null ? "" : film.getAsString(), replays);
+            JsonElement mode = json.get("mode");
+            Mode decodedMode = mode == null ? Mode.LEGACY
+                : "inherit".equals(mode.getAsString()) ? Mode.INHERIT
+                : "selected".equals(mode.getAsString()) ? Mode.SELECTED : Mode.LEGACY;
+
+            return new Selection(film == null ? "" : film.getAsString(), replays, decodedMode);
         }
         catch (RuntimeException e)
         {
@@ -97,6 +107,11 @@ public final class ReplaySelection
     }
 
     public static String encode(String film, Collection<String> replays)
+    {
+        return encode(film, replays, Mode.LEGACY);
+    }
+
+    public static String encode(String film, Collection<String> replays, Mode mode)
     {
         JsonObject json = new JsonObject();
         JsonArray array = new JsonArray();
@@ -111,6 +126,11 @@ public final class ReplaySelection
 
         json.addProperty("film", film == null ? "" : film);
         json.add("replays", array);
+
+        if (mode != Mode.LEGACY)
+        {
+            json.addProperty("mode", mode == Mode.INHERIT ? "inherit" : "selected");
+        }
 
         return json.toString();
     }

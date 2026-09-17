@@ -4,10 +4,21 @@
 
 Последнее 09-16: порт v2 на BBS 2.6 собран, BBS 1228 / патч 434 / bundle PASS. Игровой этап у пользователя; computer-use запрещён, допускаются внешние скрипты. Код не закоммичен. Продолжение: [[plan-port-perlight-v2]].
 
+Последнее 09-17: дорожная карта до 2.0 зафиксирована пользователем — [[plan-per-light-replays-to-2.0-roadmap]] (порт per-light replay на 6 паков без DOF → порт на версии аддона → редакторы → релиз 1.1.7 → ветка оптимизации → 6 пунктов из architecture-audit-cpu-findings → релиз 2.0).
+
+Последнее 09-17: Lit/Outline Replays + профили VL перенесены на 6 остальных паков без DOF; 2594 round-trip PASS, build PASS, runtime у пользователя. Готовые паки *_IRLights_Replays; детали [[plan-per-light-replays-to-2.0-roadmap]].
+
+Последнее 09-17: пользователь подтвердил пять паков; IterationRP исправлен (Iris игнорировал однострочную RG32F-директиву), пользователь поручил коммит и закрыл задачу; следующий шаг — версии аддона — [[shader-iterationrp-pipeline]].
+
+Последнее 09-17: шаг 2 roadmap ЗАВЕРШЁН — Lit/Outline Replays на 1.20.1/1.20.4/1.21.1/1.21.11: сборки/автоматика и все четыре игровые приёмки PASS, подтверждены пользователем. Без коммитов; следующий шаг3 — редакторы, НЕ начат. [[project-per-light-replays-version-ports]].
+
 Открыто: визуальный тест v2; синхронизация редактора и DOF после UBO-миграции. Остальные хвосты — в тематических заметках и _index-recovery-2026-09-16.md.
 
 - [[project-java-optimization-2026-09-11-iter1]] — Последнее09-11: Java-итерация1,6/7кандидатов реализованы,1.1.6;…
+- [[plan-caster-cpu-pipeline]] — 09-16 расследование CPU-пайплайна кастеров: корень = FormRenderer.render на каждую пару лампа×кастер; план 0–5 (замер → per-frame кэш геометрии → бюджет оверлеев), НЕ начато.
 - [[plan-port-perlight-v2]] — Порт кода и автоматические проверки DONE; игровой тест OPEN.
+- [[project-hard-shadows-branch-ab]] — ветка perf/hard-shadows (core+addon 1.1.7-hard, НЕ закоммичена): размытие теней вырезано, A/B-комплект в deliverables/ab-hard-shadows; игровой A/B OPEN у пользователя.
+- [[project-irlights-optimized-fork-estimate]] — оценка форка IRLights-Optimized 09-16 (НЕ начат): toon/outline/live ≈ 0; рычаг = жёсткие тени без EVSM/пирамид + лимиты.
 - [[project-per-light-profiles]] — Старая struct-реализация RETIRED; факты о BBS 2.6 и треках.
 - [[plan-per-light-profiles-and-colored-shadows]] — перф-прикидка 09-10: цветные тени/витраж (НЕ начата) + per-light…
 - [[project-performance-redesign-stage1a]] — АКТИВНЫЙ перф-редизайн: этап 1а (reuse неизменившегося…
@@ -95,3 +106,11 @@
 - [[bsl-pipeline]] — BSL v10 #120 CRLF; done (29 ops).
 - [[solas-pipeline]] — Solas #130; done (19 ops, ru_RU); irislex.
 - [[bliss-pipeline]] — Bliss #120 dual-hook; CR-синхра DONE; «BSL-lib+4 дельты», TAAU…
+
+Последнее09-17: новый UX Lit/Outline Replays только1.20.4 реализован в _wt-addon-1.20.x: ключ+выбор без тоглов, порядок групп сохранён; build/1306checks/11anchors/bundle PASS. Runtime OPEN у пользователя, затем порт UX. [[project-replay-selection-ux]].
+
+Последнее09-17: UX Lit/Outline после принятой1.20.4 перенесён на1.20.1/1.21.1/1.21.11. Все3build,3918BBS+33anchors,bundle PASS; выдача replay-ux-1.1.7. Ручной runtime трёх портов OPEN, запускается1.21.11. [[project-replay-selection-ux]].
+
+Последнее09-17: пользователь подтвердил новый UX на запущенной1.21.11 («проверил, всё норм»), runtime PASS. Ручная приёмка UX на1.20.1/1.21.1 отдельно не подтверждена. [[project-replay-selection-ux]].
+
+Последнее09-17: пользователь подтвердил UX на оставшихся1.20.1/1.21.1 и поручил коммит. Все4версии приняты, UX+тираж закрыты; следующий шаг — standalone редактор, НЕ начат. [[project-replay-selection-ux]].

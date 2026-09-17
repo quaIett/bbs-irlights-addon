@@ -102,8 +102,8 @@ dependencies {
     // --- Shared BBS-free engine: light SSBO + .irlights patcher (irl-core) ---
     // Per-version Loom module from mavenLocal (1.21.11 intermediary flavor): modClientImplementation
     // remaps it to this mod's named mappings; `include` bundles it (JiJ).
-    modClientImplementation "org.qualet:irl-core:1.1.6"
-    include "org.qualet:irl-core:1.1.6"
+    modClientImplementation "org.qualet:irl-core:1.1.7"
+    include "org.qualet:irl-core:1.1.7"
 
     // Iris is referenced at compile time (sampler mixins). Sodium 0.8.7 is the exact build
     // Iris 1.10.7 pins; runtime-only.

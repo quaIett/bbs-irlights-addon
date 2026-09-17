@@ -200,10 +200,20 @@ public final class LightCollector
             IrliteConfig.outlinePixelSize()
         );
         VlGlobalsBuffer.setShadow(IrliteConfig.shadowsLive(), IrliteConfig.shadowSoftness());
+        VlGlobalsBuffer.setSurface(
+            IrliteConfig.diffuse(),
+            IrliteConfig.intensity(),
+            IrliteConfig.specular(),
+            IrliteConfig.specularIntensity(),
+            IrliteConfig.toon(),
+            IrliteConfig.toonBands(),
+            IrliteConfig.toonSmooth()
+        );
         // Dev VL profiler sweep (-Dirlite.profileVl=true): may re-issue the push
         // above with per-config flag overrides — last write wins before upload.
         // New VlGlobalsBuffer.set args must be mirrored in VlSweep.overrideVlGlobals.
-        // setOutline is NOT mirrored there by design — the sweep only varies VL.
+        // setOutline/setShadow/setSurface are NOT mirrored there by design — the
+        // sweep only varies VL, and their flag words are separate from set()'s.
         VlProfiler.overrideVlGlobals();
 
         if (world == null || cameraPos == null)
@@ -483,7 +493,7 @@ public final class LightCollector
         }
     }
 
-    private static FilmEditorController getActiveEditorController()
+    public static FilmEditorController getActiveEditorController()
     {
         try
         {
@@ -517,6 +527,7 @@ public final class LightCollector
         // the absolute world position without the far-from-origin float quantization.
         Color c = form.color.get();
         LightRegistry.registerPoint(baseX + origin.x, baseY + origin.y, baseZ + origin.z, c.r, c.g, c.b, form.intensity.get(), form.radius.get(), form.entitiesOnly.get(), form.blocksOnly.get(), form.anisotropy.get(), form.vlDensity.get(), form.beamStrength.get(), form.bulbSize.get(), form.shadows.get(), System.identityHashCode(form));
+        LightEffectsRegistration.apply(form);
     }
 
     private static void emitSpot(SpotlightForm form, Matrix4f matrix, double baseX, double baseY, double baseZ,
@@ -545,5 +556,6 @@ public final class LightCollector
         // added back to recover the absolute world position without float quantization.
         Color c = form.color.get();
         LightRegistry.registerSpot(baseX + origin.x, baseY + origin.y, baseZ + origin.z, dx, dy, dz, c.r, c.g, c.b, form.intensity.get(), form.range.get(), cosOuter, cosInner, form.entitiesOnly.get(), form.blocksOnly.get(), form.anisotropy.get(), form.vlDensity.get(), form.beamStrength.get(), form.bulbSize.get(), form.shadows.get(), (float) cookieLayer, cookieRot, form.cookieScale.get(), cookieFlags, System.identityHashCode(form));
+        LightEffectsRegistration.apply(form);
     }
 }

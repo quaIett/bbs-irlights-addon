@@ -40,6 +40,13 @@ public final class IrliteConfig
     public static ValueBoolean shadowsLive;
     public static ValueFloat shadowSoftness;
     public static ValueBoolean shadowPartialTile;
+    public static ValueBoolean diffuse;
+    public static ValueFloat intensity;
+    public static ValueBoolean specular;
+    public static ValueFloat specularIntensity;
+    public static ValueBoolean toon;
+    public static ValueInt toonBands;
+    public static ValueFloat toonSmooth;
 
     private IrliteConfig()
     {}
@@ -370,5 +377,54 @@ public final class IrliteConfig
     public static float shadowSoftness()
     {
         return shadowSoftness != null ? shadowSoftness.get() : 0.10F;
+    }
+
+    /* ---- surface lighting (wave 2: moved off the Iris screen into the globals UBO) ----
+     *
+     * Same deal as the outline block: live through the UBO each frame, silently
+     * inert on a pack without the surface block, defaults equal to the pack's
+     * former compile-time defaults. */
+
+    /** Diffuse light from IRLights lights on surfaces. Default on. */
+    public static boolean diffuse()
+    {
+        return diffuse == null || diffuse.get();
+    }
+
+    /** Master multiplier for diffuse, specular and the outline rim; the
+     *  volumetric beams keep their own vlIntensity. Default 1.0. */
+    public static float intensity()
+    {
+        return intensity != null ? intensity.get() : 1F;
+    }
+
+    /** Specular highlight from IRLights lights. Default on. */
+    public static boolean specular()
+    {
+        return specular == null || specular.get();
+    }
+
+    /** Extra multiplier on the specular highlight only. Default 1.0. */
+    public static float specularIntensity()
+    {
+        return specularIntensity != null ? specularIntensity.get() : 1F;
+    }
+
+    /** Toon (cel) banding of the diffuse light. Default off. */
+    public static boolean toon()
+    {
+        return toon != null && toon.get();
+    }
+
+    /** Number of toon brightness bands. Default 3. */
+    public static int toonBands()
+    {
+        return toonBands != null ? toonBands.get() : 3;
+    }
+
+    /** Softness of the toon band edges; 0 = hard steps. Default 0.10. */
+    public static float toonSmooth()
+    {
+        return toonSmooth != null ? toonSmooth.get() : 0.10F;
     }
 }

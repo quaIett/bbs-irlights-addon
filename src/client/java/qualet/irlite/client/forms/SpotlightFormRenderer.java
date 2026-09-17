@@ -12,6 +12,7 @@ import qualet.irlite.client.light.IRLightPositionResolver;
 import qualet.irlite.client.light.cookie.CookieArray;
 import org.qualet.irl.light.LightMath;
 import org.qualet.irl.light.LightRegistry;
+import qualet.irlite.client.light.LightEffectsRegistration;
 import qualet.irlite.forms.SpotlightForm;
 
 public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightForm>
@@ -108,5 +109,6 @@ public class SpotlightFormRenderer extends AbstractLightFormRenderer<SpotlightFo
             (float) cookieLayer, cookieRot, this.form.cookieScale.get(), cookieFlags,
             System.identityHashCode(this.form)
         );
+        LightEffectsRegistration.apply(this.form);
     }
 }

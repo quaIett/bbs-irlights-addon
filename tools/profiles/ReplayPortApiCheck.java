@@ -32,6 +32,19 @@ public final class ReplayPortApiCheck {
     }
     public static void main(String[] args) throws Exception {
         String b = "mchorse/bbs_mod/", editor = b + "ui/film/replays/UIReplaysEditor";
+        String keyEditors = b + "ui/framework/elements/input/keyframes/";
+        method(keyEditors + "factories/UIKeyframeFactory", "createPanel", "(L" + b + "utils/keyframes/Keyframe;L" + keyEditors + "UIKeyframes;)L" + keyEditors + "factories/UIKeyframeFactory;");
+        method(keyEditors + "UIKeyframeSheet", "getRowColor", "()I");
+        method(editor, "getExpandedTracks", "()L" + b + "ui/framework/elements/input/items/FoldState;");
+        if (read(keyEditors + "UIKeyframeSheet").fields.stream().noneMatch(f -> f.name.equals("descriptor")
+                && f.desc.equals("L" + b + "film/replays/tracks/TrackDescriptor;")
+                && (f.access & org.objectweb.asm.Opcodes.ACC_FINAL) != 0))
+            throw new AssertionError("UIKeyframeSheet.descriptor anchor missing");
+        checks++;
+        if (read(editor).fields.stream().noneMatch(f -> f.name.equals("expandedTracksByReplay")
+                && f.desc.equals("Ljava/util/Map;") && (f.access & org.objectweb.asm.Opcodes.ACC_FINAL) != 0))
+            throw new AssertionError("UIReplaysEditor.expandedTracksByReplay anchor missing");
+        checks++;
         String category = editor + "$ReplayCategory";
         method(category, "<init>", "(Ljava/lang/String;IL" + b + "ui/utils/icons/Icon;L" + b + "l10n/keys/IKey;L" + b + "l10n/keys/IKey;)V");
         if (read(category).fields.stream().noneMatch(f -> f.name.equals("$VALUES") && f.desc.equals("[L" + category + ";")))

@@ -8,13 +8,17 @@ import mchorse.bbs_mod.ui.film.replays.UIReplaysEditor.ReplayCategory;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
+import mchorse.bbs_mod.ui.framework.elements.input.items.FoldState;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import qualet.irlite.client.ui.replays.LightReplayTracks;
+import qualet.irlite.client.ui.replays.LightTrackLayout;
 
 import java.util.List;
 import java.util.Map;
@@ -31,6 +35,9 @@ public abstract class UIReplaysLightCategoryMixin
     @Shadow public Map<ReplayCategory, UIIcon> tabButtons;
     @Shadow private ReplayCategory category;
     @Shadow private Replay replay;
+    @Shadow @Final private Map<String, FoldState<String>> expandedTracksByReplay;
+
+    @Unique private boolean irlite$newFoldState;
 
     @Inject(method = "categoryOf(Lmchorse/bbs_mod/ui/framework/elements/input/keyframes/UIKeyframeSheet;)Lmchorse/bbs_mod/ui/film/replays/UIReplaysEditor$ReplayCategory;", at = @At("HEAD"), cancellable = true)
     private static void irlite$lightCategory(UIKeyframeSheet sheet, CallbackInfoReturnable<ReplayCategory> cir)
@@ -77,6 +84,33 @@ public abstract class UIReplaysLightCategoryMixin
         if (!has && this.category == light)
         {
             this.category = ReplayCategory.FORM;
+        }
+    }
+
+    @Inject(method = "getExpandedTracks", at = @At("HEAD"))
+    private void irlite$rememberFreshFoldState(CallbackInfoReturnable<FoldState<String>> cir)
+    {
+        String replayId = this.replay == null ? "" : this.replay.getId();
+
+        this.irlite$newFoldState = !this.expandedTracksByReplay.containsKey(replayId);
+    }
+
+    @Inject(method = "getExpandedTracks", at = @At("RETURN"))
+    private void irlite$expandMainLightGroups(CallbackInfoReturnable<FoldState<String>> cir)
+    {
+        if (!this.irlite$newFoldState || this.replay == null)
+        {
+            return;
+        }
+
+        FoldState<String> folds = cir.getReturnValue();
+
+        for (TrackDescriptor track : TrackCatalog.of(this.replay.form.get(), this.replay.properties))
+        {
+            if (LightTrackLayout.expandedByDefault(track))
+            {
+                folds.set(track.key(), true);
+            }
         }
     }
 }

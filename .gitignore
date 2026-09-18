@@ -129,3 +129,8 @@ Shadres/
 !gradle-wrapper.jar
 # Scratch backup dir from shader-port work (irlbak_*); name uses a PUA glyph rendered as ":"
 TEMP/
+
+# AI assistant memory and local config - not for publication
+/memory/
+/.claude/
+/CLAUDE.md

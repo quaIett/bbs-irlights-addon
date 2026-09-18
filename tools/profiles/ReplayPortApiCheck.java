@@ -32,6 +32,8 @@ public final class ReplayPortApiCheck {
     }
     public static void main(String[] args) throws Exception {
         String b = "mchorse/bbs_mod/", editor = b + "ui/film/replays/UIReplaysEditor";
+        String keyEditors = b + "ui/framework/elements/input/keyframes/";
+        method(keyEditors + "factories/UIKeyframeFactory", "createPanel", "(L" + b + "utils/keyframes/Keyframe;L" + keyEditors + "UIKeyframes;)L" + keyEditors + "factories/UIKeyframeFactory;");
         String category = editor + "$ReplayCategory";
         method(category, "<init>", "(Ljava/lang/String;IL" + b + "ui/utils/icons/Icon;L" + b + "l10n/keys/IKey;L" + b + "l10n/keys/IKey;)V");
         if (read(category).fields.stream().noneMatch(f -> f.name.equals("$VALUES") && f.desc.equals("[L" + category + ";")))

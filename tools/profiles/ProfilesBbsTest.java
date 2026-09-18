@@ -20,6 +20,7 @@ import org.qualet.irl.light.LightProfile;
 import org.qualet.irl.light.LightRegistry;
 import qualet.irlite.IrliteConfig;
 import qualet.irlite.client.ui.replays.LightTrackLayout;
+import qualet.irlite.client.ui.replays.LightKeyframeRanges;
 import qualet.irlite.forms.*;
 
 import java.lang.reflect.Field;
@@ -86,6 +87,9 @@ public final class ProfilesBbsTest
         check(ReplaySelection.decode(ReplaySelection.encode("фильм/тест", List.of())).isEmpty(), "empty selection");
         verifyTimeline();
         verifyRegistration();
+        verifyAnimatedEffects();
+        verifyOutlineThickness();
+        verifyKeyframeSliderLimits();
         verifyReplayUx();
         Files.writeString(Path.of(args[0]), "{\"passed\":true,\"bbs\":\"2.6\",\"checks\":" + checks
             + ",\"timelinePlayback\":true,\"legacyForms\":true,\"steppedSelections\":true,\"globalQuality\":true,\"replayUx\":true}");
@@ -100,7 +104,8 @@ public final class ProfilesBbsTest
             var paths = FormUtils.collectPropertyPaths(light);
             check(paths.containsAll(List.of("vl_intensity", "outline_strength", "outline_replays", "light_replays")), "flat animation paths");
             check(!paths.contains("effects") && !paths.contains("custom_vl") && !paths.contains("outline_target"), "profile modes remain form switches");
-            check(!paths.contains("vl_steps") && !paths.contains("vl_shadow_stride") && !paths.contains("vl_noise_stride") && !paths.contains("outline_pixel_size"), "quality remains global");
+            check(!paths.contains("vl_steps") && !paths.contains("vl_shadow_stride") && !paths.contains("vl_noise_stride"), "VL quality remains global");
+            check(paths.contains("outline_pixel_size"), "outline thickness is animatable");
             FormProperties properties = new FormProperties("properties");
             for (String path : paths)
             {
@@ -172,6 +177,190 @@ public final class ProfilesBbsTest
         Field has = LightRegistry.class.getDeclaredField("hasProfile");
         has.setAccessible(true);
         check(!((boolean[]) has.get(null))[0], "switching off restores inheritance");
+    }
+
+    /** Saved numeric tracks must drive the rendered profile even on a default light. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void verifyAnimatedEffects() throws Exception
+    {
+        String[] paths = {"vl_intensity", "vl_max_dist", "vl_tip_boost", "vl_tip_radius",
+            "vl_noise_amount", "vl_noise_scale", "vl_noise_speed", "vl_noise_morph",
+            "outline_strength", "outline_fresnel", "outline_back", "outline_front_strength", "outline_glow_strength"};
+        String[] fields = {"intensity", "maxDist", "tipBoost", "tipRadius", "noiseAmount", "noiseScale",
+            "noiseSpeed", "noiseMorph", "strength", "fresnel", "back", "front", "glow"};
+        int[] offsets = {0, 4, 8, 12, 16, 20, 24, 48, 64, 68, 72, 76, 80};
+        var write = LightProfile.class.getDeclaredMethod("write", java.nio.ByteBuffer.class, int.class);
+        write.setAccessible(true);
+
+        for (LightForm source : List.of(new PointLightForm(), new SpotlightForm()))
+        {
+            for (int i = 0; i < paths.length; i++)
+            {
+                LightForm live = (LightForm) FormUtils.copy(source);
+                var saved = live.toData();
+                ValueFloat value = (ValueFloat) FormUtils.getProperty(live, paths[i]);
+                FormProperties authored = new FormProperties("properties");
+                KeyframeChannel channel = authored.getOrCreate(source, paths[i]);
+                float a = value.getMin().floatValue();
+                float b = a + (value.getMax().floatValue() - a) * .8F;
+                channel.insert(0, a);
+                channel.insert(10, b);
+                channel.get(0).getInterpolation().setInterp(Interpolations.LINEAR);
+                FormProperties playback = new FormProperties("properties");
+                playback.fromData(authored.toData());
+
+                check(profile(live) == null, "unanimated default light inherits globals");
+                for (int tick : new int[] {0, 5, 10, 0})
+                {
+                    playback.applyProperties(live, tick);
+                    LightProfile p = profile(live);
+                    boolean vl = paths[i].startsWith("vl_");
+                    check(p != null, "numeric key activates profile: " + paths[i]);
+                    check(p.customVl == vl && p.customOutline != vl, "only keyed section activates: " + paths[i]);
+                    float expected = a + (b - a) * tick / 10F;
+                    check(Math.abs(LightProfile.class.getField(fields[i]).getFloat(p) - expected) < .0001F,
+                        "animated value reaches light registry: " + paths[i]);
+                    var packed = java.nio.ByteBuffer.allocate(LightProfile.BYTES);
+                    write.invoke(p, packed, 0);
+                    check((packed.getInt(96) & 3) == (vl ? 1 : 2), "GPU uses the animated section");
+                    check(Math.abs(packed.getFloat(offsets[i]) - expected) < .0001F, "GPU payload follows key: " + paths[i]);
+                    if (paths[i].equals("outline_front_strength")) check((p.flags & 512) != 0, "front strength key activates front rim");
+                    if (paths[i].equals("outline_glow_strength")) check((p.flags & 1024) != 0, "glow strength key activates glow");
+                    check(live.toData().equals(saved), "animation does not alter saved form settings");
+                }
+                playback.resetProperties(live);
+                check(profile(live) == null, "reset releases automatic profile: " + paths[i]);
+                check(live.toData().equals(saved) && source.toData().equals(saved), "source and live form remain unchanged");
+
+                // A key equal to the saved value still overrides global settings.
+                channel.get(0).setValue(value.getOriginalValue());
+                authored.applyProperties(live, 0);
+                check(profile(live) != null, "equal-valued key still activates profile");
+                channel.removeAll();
+                authored.applyProperties(live, 0);
+                check(profile(live) == null, "deleting all keys releases the profile");
+            }
+
+            LightForm live = (LightForm) FormUtils.copy(source);
+            FormProperties both = new FormProperties("properties");
+            both.getOrCreate(live, "vl_tip_boost").insert(0, 2F);
+            both.getOrCreate(live, "outline_strength").insert(0, 1F);
+            both.applyProperties(live, 0);
+            check(profile(live).customVl && profile(live).customOutline, "both sections animate together");
+            live.effects.outlineReplays.set(ReplaySelection.encode("film", List.of(), ReplaySelection.Mode.SELECTED));
+            check(profile(live).selectedReplays && profile(live).replayIds.length == 0, "numeric keys preserve Nobody targeting");
+            live.effects.outlineReplays.set(ReplaySelection.encode("", List.of(), ReplaySelection.Mode.INHERIT));
+            check(profile(live).customOutline && !profile(live).selectedReplays, "list inheritance does not disable numeric outline keys");
+            live.effects.customVl.set(true);
+            both.resetProperties(live);
+            check(profile(live).customVl && !profile(live).customOutline, "reset keeps manually enabled section");
+
+            live.effects.vlEnabled.set(false);
+            live.effects.vlNoise.set(false);
+            live.effects.outline.set(false);
+            FormProperties noise = new FormProperties("properties");
+            noise.getOrCreate(live, "vl_noise_amount").insert(0, .8F);
+            noise.applyProperties(live, 0);
+            check(profile(live).intensity > 0 && (profile(live).flags & 2) != 0, "noise key activates beam and noise");
+            noise.resetProperties(live);
+            check(profile(live).intensity == 0 && (profile(live).flags & 2) == 0, "reset restores disabled beam and noise");
+            FormProperties outline = new FormProperties("properties");
+            outline.getOrCreate(live, "outline_strength").insert(0, 1F);
+            outline.applyProperties(live, 0);
+            check((profile(live).flags & 256) != 0, "strength key activates disabled outline");
+            outline.resetProperties(live);
+            check((profile(live).flags & 256) == 0, "reset restores disabled outline");
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void verifyOutlineThickness() throws Exception
+    {
+        var write = LightProfile.class.getDeclaredMethod("write", java.nio.ByteBuffer.class, int.class);
+        write.setAccessible(true);
+        for (LightForm source : List.of(new PointLightForm(), new SpotlightForm()))
+        {
+            IrliteConfig.outlinePixelSize.set(2);
+            source.effects.customOutline.set(true);
+            MapType legacy = (MapType) source.toData();
+            legacy.remove("outline_pixel_size");
+            source.fromData(legacy);
+            check(profile(source).pixelSize == 2, "legacy own outline retains global thickness");
+            IrliteConfig.outlinePixelSize.set(5);
+            check(profile(source).pixelSize == 5, "unkeyed legacy thickness follows global edits");
+            source.effects.customOutline.set(false);
+            FormProperties properties = new FormProperties("properties");
+            KeyframeChannel channel = properties.getOrCreate(source, "outline_pixel_size");
+            channel.insert(0, 1F);
+            channel.insert(10, 5F);
+            channel.insert(20, 0F);
+            channel.get(0).getInterpolation().setInterp(Interpolations.LINEAR);
+            var catalog = TrackCatalog.of(source, properties);
+            LightTrackLayout.decorate(catalog);
+            var track = catalog.stream().filter(t -> t.kind() == TrackKind.PROPERTY && t.id().subject().equals("outline_pixel_size")).findFirst().orElseThrow();
+            check(track.title().get().equals("Thickness") && track.parent().formPath().equals("irlights.outline"), "thickness is in the Outline timeline section");
+            FormProperties restored = new FormProperties("properties");
+            restored.fromData(properties.toData());
+            LightForm live = (LightForm) FormUtils.copy(source);
+            for (int tick : new int[] {0, 5, 10, 20, 0})
+            {
+                restored.applyProperties(live, tick);
+                LightProfile p = profile(live);
+                int expected = tick == 0 ? 1 : tick == 5 ? 3 : 5;
+                check(p != null && p.customOutline && !p.customVl && (p.flags & 256) != 0, "thickness key alone enables outline");
+                check(p.pixelSize == expected, "thickness at " + tick + ": expected " + expected + ", got " + p.pixelSize);
+                var packed = java.nio.ByteBuffer.allocate(LightProfile.BYTES);
+                write.invoke(p, packed, 0);
+                check(packed.getFloat(84) == expected, "animated thickness reaches GPU slot");
+                check(live.toData().equals(source.toData()), "thickness playback does not edit the saved form");
+            }
+            restored.resetProperties(live);
+            check(profile(live) == null, "reset releases thickness override");
+            LightEffectsRegistration.copyGlobals(live.effects, false);
+            check(live.effects.outlinePixelSize.get() == 5, "copy globals includes thickness");
+            live.effects.outlinePixelSize.set(4F);
+            LightForm copy = (LightForm) FormUtils.copy(live);
+            check(copy.effects.outlinePixelSize.get() == 4 && profile(copy).pixelSize == 4, "explicit thickness survives save and copy");
+        }
+        IrliteConfig.outlinePixelSize.set(2);
+    }
+
+    /** UI bounds must match the effective GPU bounds rather than arbitrary form-editor limits. */
+    private static void verifyKeyframeSliderLimits() throws Exception
+    {
+        String[] paths = {"vl_intensity", "vl_max_dist", "vl_tip_boost", "vl_tip_radius", "vl_noise_amount",
+            "vl_noise_scale", "vl_noise_speed", "vl_noise_morph", "outline_strength", "outline_fresnel",
+            "outline_back", "outline_front_strength", "outline_glow_strength"};
+        int[] offsets = {0, 4, 8, 12, 16, 20, 24, 48, 64, 68, 72, 76, 80};
+        var write = LightProfile.class.getDeclaredMethod("write", java.nio.ByteBuffer.class, int.class);
+        write.setAccessible(true);
+        for (LightForm form : List.of(new PointLightForm(), new SpotlightForm()))
+        {
+            for (int i = 0; i < paths.length; i++)
+            {
+                ValueFloat value = (ValueFloat) form.get(paths[i]);
+                var range = LightKeyframeRanges.of(value);
+                check(range != null, "clamped render property has slider: " + paths[i]);
+                for (double raw : new double[] {range.min() - 10, range.max() + 10})
+                {
+                    value.setRuntimeValue((float) raw);
+                    var packed = java.nio.ByteBuffer.allocate(LightProfile.BYTES);
+                    write.invoke(profile(form), packed, 0);
+                    check(Math.abs(packed.getFloat(offsets[i]) - range.clamp(raw)) < .0001,
+                        "slider boundary matches real GPU saturation: " + paths[i]);
+                }
+                value.setRuntimeValue(null);
+            }
+            check(LightKeyframeRanges.of(form.intensity) == null, "main light intensity remains unrestricted");
+            check(LightKeyframeRanges.of(form.beamStrength) == null && LightKeyframeRanges.of(form.vlDensity) == null,
+                "unbounded beam and density keep normal trackpads");
+            check(LightKeyframeRanges.of(form.effects.outlinePixelSize).clamp(0) == 0, "thickness slider preserves global sentinel");
+        }
+        Form unrelated = new Form() {};
+        ValueFloat sameName = new ValueFloat("vl_noise_amount", 7F);
+        unrelated.add(sameName);
+        check(LightKeyframeRanges.of(sameName) == null, "same-named properties on unrelated forms are unaffected");
+        check(LightKeyframeRanges.of(null) == null, "non-property tracks are unaffected");
     }
 
     /** The headless JVM installs the same hook as ReplaySelectionTrackMixin; all remaining

@@ -97,6 +97,7 @@ public final class LightTrackLayout
         COMMON.put("outline", new Style(OUTLINE_OWN, "Outline", 0xb58cff, Icons.OUTLINE));
         COMMON.put("outline_target", new Style(OUTLINE_OWN, "Target (all / entities / blocks)", 0xa77dff, Icons.POINTER));
         COMMON.put("outline_strength", new Style(OUTLINE_OWN, "Strength", 0xc29aff, Icons.GRAPH));
+        COMMON.put("outline_pixel_size", new Style(OUTLINE_OWN, "Thickness", 0xb58cff, Icons.OUTLINE));
         COMMON.put("outline_fresnel", new Style(OUTLINE_OWN, "Fresnel falloff", 0x8f6be8, Icons.ARC));
         COMMON.put("outline_back", new Style(OUTLINE_OWN, "Back rim", 0x7d5bd1, Icons.ARROW_LEFT));
         COMMON.put("outline_front", new Style(OUTLINE_OWN, "Front rim", 0xc7a6ff, Icons.ARROW_RIGHT));

@@ -12,7 +12,7 @@
 
 Последнее 09-17: шаг 2 roadmap ЗАВЕРШЁН — Lit/Outline Replays на 1.20.1/1.20.4/1.21.1/1.21.11: сборки/автоматика и все четыре игровые приёмки PASS, подтверждены пользователем. Без коммитов; следующий шаг3 — редакторы, НЕ начат. [[project-per-light-replays-version-ports]].
 
-Открыто: визуальный тест v2; синхронизация редактора и DOF после UBO-миграции. Остальные хвосты — в тематических заметках и _index-recovery-2026-09-16.md.
+Открыто: релиз1.1.7 (следующий шаг roadmap); синхронизация DOF. Обновление ядра standalone редакторов закрыто09-17. Остальные хвосты — в тематических заметках и _index-recovery-2026-09-16.md.
 
 - [[project-java-optimization-2026-09-11-iter1]] — Последнее09-11: Java-итерация1,6/7кандидатов реализованы,1.1.6;…
 - [[plan-caster-cpu-pipeline]] — 09-16 расследование CPU-пайплайна кастеров: корень = FormRenderer.render на каждую пару лампа×кастер; план 0–5 (замер → per-frame кэш геометрии → бюджет оверлеев), НЕ начато.
@@ -75,6 +75,7 @@
 - [[addon-forms]] — PointLightForm/SpotlightForm на BBS Form; маски->lightMask.
 - [[project-light-form-item-icon]] — иконка light-формы в инвентаре: DONE 3a1ad5e; хвост cherry-pick в…
 - [[addon-light-collection]] — SCANNER vs RENDER, дедуп; MAX_LIGHTS=2048.
+- [[fix-jij-core-java-version-mismatch]] — краш UnsupportedClassVersionError 1.20.1: зашитый JiJ core был Java21; после publishToMavenLocal core ОБЯЗАТЕЛЬНО пересобирать аддон; Loom1.15.5 gradle на JVM21 но байткод Java17.
 - [[fix-modelblock-light-animation-states]] — ModelBlock-свет не ехал за animation states; фикс walk() (PASS).
 - [[fix-render-path-light-world-pos-1211]] — render-path свет на 1.21 гулял; фикс = context.world (port/1.21.1,…
 - [[fix-cookie-render-path-spotlights]] — gobo не работал на render-path спотах (BodyPart-кость/актёры/реплеи):…
@@ -114,3 +115,25 @@
 Последнее09-17: пользователь подтвердил новый UX на запущенной1.21.11 («проверил, всё норм»), runtime PASS. Ручная приёмка UX на1.20.1/1.21.1 отдельно не подтверждена. [[project-replay-selection-ux]].
 
 Последнее09-17: пользователь подтвердил UX на оставшихся1.20.1/1.21.1 и поручил коммит. Все4версии приняты, UX+тираж закрыты; следующий шаг — standalone редактор, НЕ начат. [[project-replay-selection-ux]].
+
+Последнее09-17: проверенный replay-чекпоинт закоммичен в3ветках addon и2ветках core, все4MC приняты; push отсутствует, perf/hard-shadows изменения сохранены отдельно. [[project-replay-selection-ux]].
+
+Последнее09-17: шаг3 CLOSED пользователем — все5редакторов core1.1.7+патчи без Java/UI правок,build/bundle PASS,6коммитов,CLEAN. Runtime1.21.11 принят; остальные4не подтверждены отдельно. Следующий шаг4 — релиз1.1.7,не начат. [[project-editor-core-117-sync]].
+
+Последнее09-17: по запросу пользователя начат perf-трек; master влит в perf/hard-shadows. Performance включает резкие тени, остальные пресеты мягкие; core+addon1.20.x+7паков1.1.7-perf собраны,автоматика PASS. Runtime/новые замеры OPEN; после запуска клиента пользователь поручил коммит core+addon. [[project-performance-shadow-mode]].
+
+Последнее09-17: perf/hard-shadows переименована в 2.0 в addon+core по запросу пользователя. Следующий пункт согласуется: предложен roadmap6.1, контролируемые замеры+CPU-детализация; код не менялся. [[plan-per-light-replays-to-2.0-roadmap]].
+
+Последнее09-17: roadmap6.1 CPU/cache детализация и schema2 окна реализованы,core+addon1.20.4 profile61.1 build/автоматика/GPU PASS. Игровые захваты/отрицательные проверки/анализ OPEN; без commit/push. [[project-profiler-roadmap-61]].
+
+Последнее09-18: по запросу пользователя разведка релизного master в _wt-addon-1.20.x; numeric VL/Outline playback+packed data PASS494, выявлены own-settings gates/пустой Outline selection/GPU clamp. Код не менялся; runtime проблемного фильма не подтверждён. [[investigation-effects-keyframes-master]].
+
+Последнее09-18: numeric Volumetric/Outline keys исправлены на master: автоматически включают собственный профиль/соответствующий эффект, reset возвращает исходные настройки. MC1.20.1/1.20.4 build,2084checks+11anchors каждый,release-core bundle PASS. Игровая приёмка OPEN,без commit/push. [[investigation-effects-keyframes-master]].
+
+Последнее09-18: по запросу «клиент не ворктрее» master+фикс теперь в ОСНОВНОЙ папке addon;2.0 изменения сохранены stash a478b308,резерв master6dff7499;_wt-addon-1.20.x detached. runClient1.20.4 запущен из основной папки. [[investigation-effects-keyframes-master]].
+
+Последнее09-18: добавлен трек Outline Thickness (1..6px,0=global),сохранена совместимость старых фильмов;1.20.4 build/2146checks+11anchors/bundle PASS. Клиент ещё на предыдущих классах,нужен restart. [[investigation-effects-keyframes-master]].
+
+Последнее09-18: ограниченные слайдеры только для ключей15параметров по GPU/GLSL-пределам;обычная интенсивность свободна. MC1.20.1/1.20.4 build/2232checks+12anchors/bundle PASS;новый запуск/UI приёмка OPEN. [[investigation-effects-keyframes-master]].
+
+Последнее09-18: клиент1.20.4 запущен из основной папки с ключами/слайдерами;трек толщины переименован в «Thickness» без скобок. Повтор2232checks+12anchors PASS. Пользователь поручил коммит текущих исправлений master,без push. [[investigation-effects-keyframes-master]].

@@ -19,7 +19,7 @@ import java.util.Objects;
  * A light whose effects are all at their defaults sends no profile at all, so the
  * shader treats it exactly as before this feature existed.</p>
  *
- * <p>The quality knobs of the profile (march steps, tap strides, outline pixel size)
+ * <p>The quality knobs of the profile (march steps and tap strides)
  * are filled from the global settings, not from the form: they are frame-cost knobs,
  * not look knobs, and stay global on purpose.</p>
  */
@@ -85,7 +85,29 @@ public final class LightEffectsRegistration
         LightEffects e = form.effects;
         long id = System.identityHashCode(form);
 
-        if (e.isDefault() && e.outlineReplays.get().isEmpty() && e.lightReplays.get().isEmpty())
+        /* BBS writes runtime values on the rendered form (also for animation states).
+         * A numeric track overrides inheritance for its section without mutating the
+         * saved switches. Reset/removal of its keys releases that override again.
+         * Test presence, not value inequality: a key equal to the local default must
+         * still override globals. Empty channels leave runtime values null. */
+        boolean animatedNoise = e.vlNoiseAmount.getRuntimeValue() != null
+            || e.vlNoiseScale.getRuntimeValue() != null
+            || e.vlNoiseSpeed.getRuntimeValue() != null
+            || e.vlNoiseMorph.getRuntimeValue() != null;
+        boolean animatedVl = animatedNoise || e.vlIntensity.getRuntimeValue() != null
+            || e.vlMaxDist.getRuntimeValue() != null
+            || e.vlTipBoost.getRuntimeValue() != null
+            || e.vlTipRadius.getRuntimeValue() != null;
+        boolean animatedFront = e.outlineFrontStrength.getRuntimeValue() != null;
+        boolean animatedGlow = e.outlineGlowStrength.getRuntimeValue() != null;
+        boolean animatedOutline = animatedFront || animatedGlow
+            || e.outlineStrength.getRuntimeValue() != null
+            || e.outlinePixelSize.getRuntimeValue() != null
+            || e.outlineFresnel.getRuntimeValue() != null
+            || e.outlineBack.getRuntimeValue() != null;
+        boolean inherit = e.isDefault() && !animatedVl && !animatedOutline;
+
+        if (inherit && e.outlineReplays.get().isEmpty() && e.lightReplays.get().isEmpty())
         {
             LightRegistry.setProfile(id, null);
 
@@ -98,7 +120,7 @@ public final class LightEffectsRegistration
         cache.outline.read(e.outlineReplays);
         cache.light.read(e.lightReplays);
 
-        if (e.isDefault() && !cache.outline.automatic && !cache.light.automatic)
+        if (inherit && !cache.outline.automatic && !cache.light.automatic)
         {
             LightRegistry.setProfile(id, null);
 
@@ -107,13 +129,13 @@ public final class LightEffectsRegistration
 
         LightProfile p = cache.profile;
 
-        p.customVl = e.customVl.get();
-        p.customOutline = cache.outline.automatic || e.customOutline.get();
+        p.customVl = animatedVl || e.customVl.get();
+        p.customOutline = animatedOutline || cache.outline.automatic || e.customOutline.get();
         p.selectedReplays = cache.outline.automatic || e.selectedReplays.get();
         p.selectedLightReplays = cache.light.automatic || e.selectedLightReplays.get();
 
         /* Volumetric: the look knobs are the light's own, the cost knobs stay global. */
-        p.intensity = e.vlEnabled.get() ? e.vlIntensity.get() : 0F;
+        p.intensity = animatedVl || e.vlEnabled.get() ? e.vlIntensity.get() : 0F;
         p.maxDist = e.vlMaxDist.get();
         p.tipBoost = e.vlTipBoost.get();
         p.tipRadius = e.vlTipRadius.get();
@@ -128,10 +150,10 @@ public final class LightEffectsRegistration
         /* Flags mirror VlGlobalsBuffer's bit layout: bit0 VL shadows, bit1 noise, bit8 outline,
          * bit9 front rim, bit10 glow, bits 11-12 target. */
         p.flags = (e.vlShadows.get() ? 1 : 0)
-            | (e.vlNoise.get() ? 2 : 0)
-            | (cache.outline.automatic || e.outline.get() ? 256 : 0)
-            | (e.outlineFront.get() ? 512 : 0)
-            | (e.outlineGlow.get() ? 1024 : 0)
+            | (animatedNoise || e.vlNoise.get() ? 2 : 0)
+            | (animatedOutline || cache.outline.automatic || e.outline.get() ? 256 : 0)
+            | (animatedFront || e.outlineFront.get() ? 512 : 0)
+            | (animatedGlow || e.outlineGlow.get() ? 1024 : 0)
             /* The replay list is the target in automatic mode, including BlockForms. */
             | ((cache.outline.automatic ? 0 : e.outlineTarget.get()) << 11);
 
@@ -140,7 +162,8 @@ public final class LightEffectsRegistration
         p.back = e.outlineBack.get();
         p.front = e.outlineFrontStrength.get();
         p.glow = e.outlineGlowStrength.get();
-        p.pixelSize = IrliteConfig.outlinePixelSize();
+        float thickness = e.outlinePixelSize.get();
+        p.pixelSize = thickness == 0F ? IrliteConfig.outlinePixelSize() : Math.max(1, Math.round(thickness));
 
         p.replayIds = cache.outline.resolve();
         p.lightReplayIds = cache.light.resolve();
@@ -171,6 +194,7 @@ public final class LightEffectsRegistration
             e.outline.set(IrliteConfig.outline());
             e.outlineTarget.set(IrliteConfig.outlineTarget());
             e.outlineStrength.set(IrliteConfig.outlineStrength());
+            e.outlinePixelSize.set((float) IrliteConfig.outlinePixelSize());
             e.outlineFresnel.set(IrliteConfig.outlineFresnelPower());
             e.outlineBack.set(IrliteConfig.outlineBack());
             e.outlineFront.set(IrliteConfig.outlineFront());

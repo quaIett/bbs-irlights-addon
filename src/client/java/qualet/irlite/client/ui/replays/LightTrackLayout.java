@@ -53,10 +53,9 @@ public final class LightTrackLayout
     private static final Group COOKIE = new Group("irlights.cookie", "Cookie / gobo", 0x8fe066, Icons.IMAGE);
     private static final Group OUTLINE_OWN = new Group("irlights.outline", "Outline", 0xb58cff, Icons.OUTLINE);
     private static final Group BEAM_OWN = new Group("irlights.beam_own", "Volumetric", 0x33ccaa, Icons.SUN);
-    private static final Group REPLAYS = new Group("irlights.replays", "Replays", 0x6fa8ff, Icons.PLAYER);
 
     /** Group order in a timeline, whatever order the form registers its values in. */
-    private static final List<Group> ORDER = List.of(LIGHT, BEAM, AFFECTS, COOKIE, BEAM_OWN, OUTLINE_OWN, REPLAYS);
+    private static final List<Group> ORDER = List.of(LIGHT, BEAM, AFFECTS, COOKIE, BEAM_OWN, OUTLINE_OWN);
 
     /** Looks shared by both light forms, keyed by property id. */
     private static final Map<String, Style> COMMON = new LinkedHashMap<>();
@@ -119,11 +118,11 @@ public final class LightTrackLayout
         COMMON.put("vl_noise_morph", new Style(BEAM_OWN, "Noise morph", 0x57e8cc, Icons.REFRESH));
         COMMON.put("vl_shadows", new Style(BEAM_OWN, "Beam shadows", 0x66aadd, Icons.OUTLINE_SPHERE));
 
-        /* Replay lists: blues, distinct from the pink Affects family. */
-        COMMON.put("selected_light_replays", new Style(REPLAYS, "Light: selected replays only", 0x5f9dff, Icons.PLAYER));
-        COMMON.put("light_replays", new Style(REPLAYS, "Lit replays", 0x79b4ff, Icons.PLAYER));
-        COMMON.put("selected_replays", new Style(REPLAYS, "Outline: selected replays only", 0x7190ff, Icons.OUTLINE));
-        COMMON.put("outline_replays", new Style(REPLAYS, "Outlined replays", 0x8aa4ff, Icons.OUTLINE));
+        /* Replay lists belong to Affects: amber for lighting, pink for outlines. */
+        COMMON.put("selected_light_replays", new Style(AFFECTS, "Light: selected replays only", 0xffaa33, Icons.PLAYER));
+        COMMON.put("light_replays", new Style(AFFECTS, "Lit replays", 0xffc266, Icons.PLAYER));
+        COMMON.put("selected_replays", new Style(AFFECTS, "Outline: selected replays only", 0xff5fa2, Icons.OUTLINE));
+        COMMON.put("outline_replays", new Style(AFFECTS, "Outlined replays", 0xff8fbd, Icons.OUTLINE));
     }
 
     private LightTrackLayout()

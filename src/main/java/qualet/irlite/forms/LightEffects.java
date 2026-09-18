@@ -16,12 +16,12 @@ import mchorse.bbs_mod.settings.values.numeric.ValueInt;
  *
  * <p>Modes (the booleans and the outline target) are form-editor switches and are
  * hidden from the timeline; the numbers animate. The look knobs mirror the global
- * IRLights settings one to one; the quality knobs (march steps, tap strides, outline
- * pixel size) deliberately stay global — see {@code LightEffectsRegistration}.</p>
+ * IRLights settings one to one; the quality knobs (march steps and tap strides)
+ * deliberately stay global — see {@code LightEffectsRegistration}.</p>
  */
 public final class LightEffects extends ValueGroup
 {
-    /* Volumetric: OFF = the light follows the global volumetric settings. */
+    /* Volumetric: OFF = global settings unless numeric tracks are animating this section. */
     public final ValueBoolean customVl = new ValueBoolean("custom_vl", false);
     public final ValueBoolean vlEnabled = new ValueBoolean("vl_enabled", true);
     public final ValueFloat vlIntensity = new ValueFloat("vl_intensity", 1F, 0F, 5F);
@@ -35,11 +35,14 @@ public final class LightEffects extends ValueGroup
     public final ValueFloat vlNoiseSpeed = new ValueFloat("vl_noise_speed", 0.25F, 0F, 3F);
     public final ValueFloat vlNoiseMorph = new ValueFloat("vl_noise_morph", 0F, 0F, 3F);
 
-    /* Outline: OFF = the light follows the global outline settings. */
+    /* Outline: OFF = global settings unless numeric tracks or automatic replay selection override it. */
     public final ValueBoolean customOutline = new ValueBoolean("custom_outline", false);
     public final ValueBoolean outline = new ValueBoolean("outline", true);
     public final ValueInt outlineTarget = new ValueInt("outline_target", 1, 0, 2);
     public final ValueFloat outlineStrength = new ValueFloat("outline_strength", 0.65F, 0F, 3F);
+    /* Zero inherits the global thickness, preserving films saved before this property existed. */
+    /* Float tracks retain interpolation in BBS; the renderer rounds to whole pixels. */
+    public final ValueFloat outlinePixelSize = new ValueFloat("outline_pixel_size", 0F, 0F, 6F);
     public final ValueFloat outlineFresnel = new ValueFloat("outline_fresnel", 2.2F, 1F, 4F);
     public final ValueFloat outlineBack = new ValueFloat("outline_back", 1F, 0F, 2F);
     public final ValueBoolean outlineFront = new ValueBoolean("outline_front", false);
@@ -76,6 +79,7 @@ public final class LightEffects extends ValueGroup
         this.add(this.outline);
         this.add(this.outlineTarget);
         this.add(this.outlineStrength);
+        this.add(this.outlinePixelSize);
         this.add(this.outlineFresnel);
         this.add(this.outlineBack);
         this.add(this.outlineFront);

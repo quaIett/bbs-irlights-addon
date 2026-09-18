@@ -112,3 +112,9 @@
 Последнее09-17: пользователь подтвердил новый UX на запущенной1.21.11 («проверил, всё норм»), runtime PASS. Ручная приёмка UX на1.20.1/1.21.1 отдельно не подтверждена. [[project-replay-selection-ux]].
 
 Последнее09-17: пользователь подтвердил UX на оставшихся1.20.1/1.21.1 и поручил коммит. Все4версии приняты, UX+тираж закрыты; следующий шаг — standalone редактор, НЕ начат. [[project-replay-selection-ux]].
+
+Последнее09-18: все изменения replay UI/Volumetric/Outline/Thickness/слайдеров master перенесены на1.20.1/1.21.1/1.21.11;каждая build/2232checks+16anchors/bundle PASS. Выдача replay-effects-1.1.7,базовая1.20.4 тоже обновлена;runtime портов OPEN,без новых commit/push. [[project-effects-keyframes-version-ports]].
+
+Последнее09-18:4сборки IRLights1.1.7 выданы Desktop/IRLights-1.1.7;1.20.1-Java17 отдельно пересобрана,все185классов<=major61 и2232+16checks наJVM17 PASS. [[project-effects-keyframes-version-ports]].
+
+Последнее09-18: auto-keyframe гайдов Spotlight перенесён на все4MC;build+39checks каждый PASS,обе1.20.x дополнительноJVM17 PASS.4JAR Desktop/IRLights-1.1.7-autokeyframes;весь байткод1.20.x=61,1.21.x=65. Чекпоинт+порты по запросу,без push. [[project-spot-guide-autokeyframes]].

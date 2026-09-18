@@ -6,7 +6,6 @@ import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframes;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.factories.UIKeyframeFactory;
-import mchorse.bbs_mod.ui.utils.UI;
 import mchorse.bbs_mod.utils.keyframes.Keyframe;
 import qualet.irlite.client.light.ReplaySelection;
 import qualet.irlite.client.light.ReplaySelectionPlayback;
@@ -26,24 +25,8 @@ public final class UIReplaySelectionKeyframeFactory extends UIKeyframeFactory<St
         this.interp.removeFromParent();
 
         UIButton choose = new UIButton(IKey.constant("Choose replays..."), (b) -> this.pick());
-        choose.tooltip(IKey.constant("Click replays to add or remove them. The selection activates automatically at this keyframe."));
+
         this.scroll.add(choose);
-        this.scroll.add(UI.label(() -> this.describe()));
-        this.scroll.add(new UIButton(IKey.constant("Nobody"), (b) ->
-            this.setValue(ReplaySelection.encode("", List.of(), ReplaySelection.Mode.SELECTED))));
-        UIButton inherit = new UIButton(IKey.constant("Use light settings"), (b) ->
-            this.setValue(USE_LIGHT_SETTINGS));
-        inherit.tooltip(IKey.constant("Return to this light's form settings at this keyframe."));
-        this.scroll.add(inherit);
-        this.scroll.add(UI.label(IKey.constant("The selection switches at this keyframe.")));
-
-        UIKeyframeSheet sheet = this.editor.getGraph().getSheet(this.keyframe);
-
-        if (sheet != null && sheet.property != null && sheet.property.getId().equals("outline_replays"))
-        {
-            this.scroll.add(UI.label(IKey.constant("Outline activates on selected replays.")));
-            this.scroll.add(UI.label(IKey.constant("Independent of the Lit Replays list.")));
-        }
     }
 
     @Override
@@ -89,27 +72,6 @@ public final class UIReplaySelectionKeyframeFactory extends UIKeyframeFactory<St
         }
 
         return selection;
-    }
-
-    private String describe()
-    {
-        if (this.getDisplayValue().isBlank())
-        {
-            return "Choose replays to activate";
-        }
-
-        ReplaySelection.Selection value = ReplaySelection.decode(this.getDisplayValue());
-
-        if (value.mode() == ReplaySelection.Mode.INHERIT)
-        {
-            return "Using light settings";
-        }
-
-        UIFilmPanel panel = this.filmPanel();
-        String summary = ReplaySelection.describe(value, panel == null ? null : panel.getData());
-
-        return value.mode() == ReplaySelection.Mode.LEGACY
-            ? "Saved selection: " + summary : "Selected: " + summary;
     }
 
     private void pick()

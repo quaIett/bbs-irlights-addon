@@ -24,8 +24,8 @@ import java.util.function.Function;
  * A light's own volumetric settings (one tab) or its own outline settings plus the
  * outline replay list (the other tab). Shared by the point light and spotlight editors.
  *
- * <p>With the "own settings" switch off the light follows the global IRLights settings
- * and the knobs below it are simply remembered. "Copy global settings" seeds them from
+     * <p>With the "own settings" switch off the light follows the global IRLights settings
+     * unless numeric keyframes activate that section. "Copy global settings" seeds it from
  * the current globals and switches the light over, so tweaking from the global look is
  * one click. Every number here is also a track in the replay's Light tab.</p>
  */
@@ -46,7 +46,7 @@ public final class UILightEffectsPanel<T extends LightForm> extends UIFormPanel<
             this.outlineReplays = null;
 
             UIElement[] beam = {
-                UI.label(IKey.constant("Off: this light follows the global volumetric settings.")),
+                UI.label(IKey.constant("Off: global settings. Keyframes activate own settings.")),
                 this.toggle("Own volumetric settings", (e) -> e.customVl),
                 new UIButton(IKey.constant("Copy global settings"), (b) ->
                 {
@@ -85,7 +85,7 @@ public final class UILightEffectsPanel<T extends LightForm> extends UIFormPanel<
 
             UIElement[] rim = {
                 UI.label(() -> this.form.effects.customOutline.get() ? "Own outline settings are active."
-                    : "Global outline: " + (IrliteConfig.outline() ? "ON" : "OFF")),
+                    : "Global outline: " + (IrliteConfig.outline() ? "ON" : "OFF") + ". Keyframes activate own settings."),
                 this.toggle("Own outline settings", (e) -> e.customOutline),
                 new UIButton(IKey.constant("Copy global settings"), (b) ->
                 {
@@ -95,6 +95,7 @@ public final class UILightEffectsPanel<T extends LightForm> extends UIFormPanel<
                 this.toggle("Outline", (e) -> e.outline),
                 target,
                 UI.label(IKey.constant("Strength")), this.trackpad((e) -> e.outlineStrength, 0, 3),
+                UI.label(IKey.constant("Thickness (px, 0 = global)")), this.trackpad((e) -> e.outlinePixelSize, 0, 6),
                 UI.label(IKey.constant("Fresnel falloff")), this.trackpad((e) -> e.outlineFresnel, 1, 4),
                 UI.label(IKey.constant("Backlight rim")), this.trackpad((e) -> e.outlineBack, 0, 2)
             };

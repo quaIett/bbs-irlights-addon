@@ -30,9 +30,16 @@ public class PointLightFormRenderer extends AbstractLightFormRenderer<PointLight
     }
 
     @Override
-    protected void renderGuide(FormRenderingContext context, Color color)
+    protected void renderGuide(FormRenderingContext context, Color color, boolean world)
     {
-        LightGuideRenderer.renderPointLight(context.stack, color, this.form.radius.get());
+        float radius = this.form.radius.get();
+
+        if (world && WorldLightGuideOverlay.defer(context.stack, color, radius, 0F, 0F, false))
+        {
+            return;
+        }
+
+        LightGuideRenderer.renderPointLight(context.stack, color, radius);
     }
 
     @Override

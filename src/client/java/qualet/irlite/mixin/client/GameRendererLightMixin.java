@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.qualet.irl.light.FramePipeline;
 import org.qualet.irl.light.iris.IrisShadersState;
 import qualet.irlite.client.diag.VlProfiler;
+import qualet.irlite.client.forms.WorldLightGuideOverlay;
 import qualet.irlite.client.light.LightCollector;
 import qualet.irlite.client.light.ReplayOutlineContext;
 
@@ -18,6 +19,7 @@ public class GameRendererLightMixin
     @Inject(method = "renderWorld", at = @At("HEAD"))
     private void irlite$collectLights(RenderTickCounter tickCounter, CallbackInfo ci)
     {
+        WorldLightGuideOverlay.beginFrame();
         // Dev VL profiler (-Dirlite.profileVl=true): the shadow bake below runs
         // strictly before the Iris pass sequence, so its GL_TIME_ELAPSED bracket
         // never nests with the per-pass brackets. collect/prioritize inside
@@ -66,5 +68,14 @@ public class GameRendererLightMixin
         long uploadT0 = System.nanoTime();
         FramePipeline.uploadIfPending();
         VlProfiler.cpuSample("upload", System.nanoTime() - uploadT0);
+    }
+
+    /** Iris has finished world compositing; BBS has not captured the film preview yet. */
+    @Inject(method = "render", at = @At(value = "INVOKE",
+        target = "Lnet/minecraft/client/render/GameRenderer;renderWorld(Lnet/minecraft/client/render/RenderTickCounter;)V",
+        shift = At.Shift.AFTER), require = 1)
+    private void irlite$drawLightGuides(RenderTickCounter tickCounter, boolean tick, CallbackInfo ci)
+    {
+        WorldLightGuideOverlay.flush();
     }
 }

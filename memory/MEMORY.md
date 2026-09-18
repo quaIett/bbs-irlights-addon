@@ -151,3 +151,5 @@
 Последнее09-18: code-only аудит1.20.1/1.20.4/1.21.1: дефекта неподключённого pipeline нет,но мировые гайды уязвимы к раннему проходу+depthMask(false);Photon может скрывать их на небе. СтрелкиBBS film UI рисуются позже;код не менялся. [[fix-world-light-guides-shaders-12111]].
 
 Последнее09-18: фикс гайдов с шейдерами перенесён на все4MC;4build,79snapshot/APIchecks,bundle/Java17/21 PASS.4JAR Desktop/IRLights-1.1.7-shader-guides. По запросу — коммиты;runtime OPEN. [[fix-world-light-guides-shaders-12111]].
+
+Последнее09-18: исправлены Lit/Outline Replays для вложенных BodyPart(useTarget=false/RenderLast): все4MC build,8972BBS+72APIchecks,bundle/Java17-21 PASS.4JAR Desktop/IRLights-1.1.7-bodyparts. Runtime OPEN;по запросу пользователя закоммичено в3ветках addon,без push. [[fix-replay-bodypart-targets]].

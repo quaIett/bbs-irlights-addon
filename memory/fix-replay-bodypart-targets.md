@@ -1,0 +1,14 @@
+---
+name: fix-replay-bodypart-targets
+description: "09-18: Lit/Outline Replays — наследование принадлежности реплею вложенными BodyPart."
+---
+
+ЗАПРОС09-18: свет/outline выбранного реплея должен распространяться на прикреплённые бодипарты.
+ПРИЧИНА: ReplayOutlineContext учитывал только context.entity из controller.getEntities(); BBS BodyPart по умолчанию useTarget=false и подменяет context.entity своим StubEntity. Документированное ранее предположение об общей сущности неверно.
+ФИКС: per-frame IdentityHashMap<Form,Integer> FORMS для фактических entity.getForm(); renderId сначала сохраняет существующий entity lookup, затем ищет зарегистрированную форму по getParentForm(). FORMS очищается вместе с ENTITIES каждый кадр. UI/picking/Iris-shadow/IRL-bake исключения и GL/cull/batch scope сохранены. Общий тег используется обоими фильтрами; core/GLSL/UI не меняются.
+ДЕТАЛИ: поиск по дереву работает для вложенности, смешанного useTarget и BBS Render Last вне scope родительского draw; не использовать fallback currentId (протекает между чужими формами и теряет отложенные части). Регистрируются только активные selectable runtime roots. Сложность — глубина вложения на draw со своей сущностью, без рекурсивного сканирования всех частей каждый кадр.
+КОД: основной addon master (1.20.1/1.20.4), существующие _wt-addon-1.21.1 и _wt-addon-1.21.11; у1.21.11 сохранён GlStateManager cull API. Detached1.20.x/редакторы/core2.0 не меняются. Предыдущие dirty shader update изменения сохранены.
+АВТОМАТИКА: ProfilesBbsTest использует реальные BBS ModelForm/BodyPart/StubEntity и дерево значений; проверяет default useTarget=false, глубокую вложенность, разрешение без активного parent draw, useTarget=true, перенос между актёрами, отсутствие утечки и сброс карты. Fixture заменяет только ItemStack.EMPTY в конструкторе StubEntity на null для обхода MC registry bootstrap; формы/иерархия/lookup не подменены. ReplayPortApiCheck дополнен getParentForm/getForm anchors. Build helper/logs: build/bodypart-replays.
+ПРОВЕРКИ: все4build PASS;2243 real-BBS checks+18APIanchors каждый (8972+72). Обе1.20.x весь runtime байткод<=61,обе1.21.x<=65;1.20.4 дополнительно2243+18наJVM17 PASS. КаждыйJAR: правильное release core1.1.7 SHA,7актуальных shader patches,mixin inventory PASS. Helper finalize.py сверил4десктопSHA. MavenLocal восстановлен наrelease1.20.x;основной addon последний профиль1.20.4.
+ВЫДАЧА: по дополнительному запросу пользователя все4JAR на Desktop/IRLights-1.1.7-bodyparts/Addon/<mc>;README.txt+общая/per-MC verification.json. Новые shader patches предыдущего этапа включены,перепатчивать GLSL ради этого Java-фикса не требуется. Редакторы не имеют BBS BodyPart и не пересобирались.
+СТАТУС: код/автоматика/выдача DONE;игровой runtime NOT_RUN,проверить выбранный реплей сdefaultUseTarget=false/вложенными/RenderLast частями и соседний невыбранный. Чекпоинт по запросу пользователя: master(обе1.20.x),port/1.21.1,port/1.21.11. Push не выполнялся.

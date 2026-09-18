@@ -91,6 +91,7 @@ public final class ProfilesBbsTest
         verifyOutlineThickness();
         verifyKeyframeSliderLimits();
         verifyReplayUx();
+        verifyBodyPartReplayOwnership();
         Files.writeString(Path.of(args[0]), "{\"passed\":true,\"bbs\":\"2.6\",\"checks\":" + checks
             + ",\"timelinePlayback\":true,\"legacyForms\":true,\"steppedSelections\":true,\"globalQuality\":true,\"replayUx\":true}");
         System.out.println("BBS 2.6 profiles PASS: " + checks + " checks");
@@ -270,6 +271,62 @@ public final class ProfilesBbsTest
             check((profile(live).flags & 256) != 0, "strength key activates disabled outline");
             outline.resetProperties(live);
             check((profile(live).flags & 256) == 0, "reset restores disabled outline");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void verifyBodyPartReplayOwnership() throws Exception
+    {
+        Field formsField = ReplayOutlineContext.class.getDeclaredField("FORMS");
+        formsField.setAccessible(true);
+        var forms = (java.util.Map<Form, Integer>) formsField.get(null);
+        Field entitiesField = ReplayOutlineContext.class.getDeclaredField("ENTITIES");
+        entitiesField.setAccessible(true);
+        var entities = (java.util.Map<mchorse.bbs_mod.forms.entities.IEntity, Integer>) entitiesField.get(null);
+        var actor = new mchorse.bbs_mod.forms.entities.StubEntity();
+        Form root = new mchorse.bbs_mod.forms.forms.ModelForm();
+        Form other = new mchorse.bbs_mod.forms.forms.ModelForm();
+        var part = new mchorse.bbs_mod.forms.forms.BodyPart("attachment");
+        var nested = new mchorse.bbs_mod.forms.forms.BodyPart("nested");
+        part.setForm(new mchorse.bbs_mod.forms.forms.ModelForm());
+        nested.setForm(new mchorse.bbs_mod.forms.forms.ModelForm());
+        root.parts.addBodyPart(part);
+        part.getForm().parts.addBodyPart(nested);
+        forms.put(root, 71);
+        forms.put(other, 92);
+        entities.put(actor, 71);
+
+        try
+        {
+            check(!part.useTarget.get(), "regression uses the default private body-part entity");
+            check(ReplayOutlineContext.renderId(root, actor) == 71, "root replay retains its entity tag");
+            check(ReplayOutlineContext.renderId(part.getForm(), part.getEntity()) == 71,
+                "body part inherits selected replay for both Lit and Outline");
+            check(ReplayOutlineContext.renderId(nested.getForm(), nested.getEntity()) == 71,
+                "deeply nested body part inherits selected replay");
+            check(ReplayOutlineContext.currentId() == 0, "test runs outside the parent draw scope");
+            part.getForm().renderLast.set(true);
+            check(ReplayOutlineContext.renderId(part.getForm(), part.getEntity()) == 71,
+                "render-last attachment resolves owner without an active parent draw");
+            part.useTarget.set(true);
+            check(ReplayOutlineContext.renderId(part.getForm(), part.getRenderEntity(actor)) == 71,
+                "useTarget body part retains actor ownership");
+            check(ReplayOutlineContext.renderId(nested.getForm(), nested.getEntity()) == 71,
+                "mixed useTarget nesting preserves ownership");
+            root.parts.removeBodyPart(part);
+            other.parts.addBodyPart(part);
+            check(ReplayOutlineContext.renderId(nested.getForm(), nested.getEntity()) == 92,
+                "moving attachment to another replay changes ownership");
+            check(ReplayOutlineContext.renderId(new mchorse.bbs_mod.forms.forms.ModelForm(), part.getEntity()) == 0,
+                "unrelated forms never inherit the previous replay");
+            forms.clear();
+            check(ReplayOutlineContext.renderId(nested.getForm(), nested.getEntity()) == 0,
+                "frame reset or disabled replay clears attachment ownership");
+        }
+        finally
+        {
+            forms.clear();
+            entities.clear();
         }
     }
 

@@ -55,6 +55,8 @@ public final class ReplayPortApiCheck {
         method(b + "film/replays/tracks/TrackCatalog", "of", "(L" + b + "forms/forms/Form;L" + b + "film/replays/FormProperties;)Ljava/util/List;");
         method(b + "film/replays/tracks/behaviours/PropertyTrack", "apply", "(L" + b + "film/replays/tracks/TrackContext;L" + b + "film/replays/tracks/TrackId;L" + b + "utils/keyframes/KeyframeChannel;FF)V");
         String renderer = b + "forms/renderers/FormRenderer", context = "(L" + b + "forms/renderers/FormRenderingContext;)V";
+        method(b + "forms/forms/Form", "getParentForm", "()L" + b + "forms/forms/Form;");
+        method(renderer, "getForm", "()L" + b + "forms/forms/Form;");
         int wrapped = 0;
         for (MethodNode m : read(b + "forms/FormUtilsClient").methods) {
             if (!m.name.equals("render")) continue;

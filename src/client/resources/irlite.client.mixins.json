@@ -13,6 +13,7 @@
     "UIFormEditorMixin",
     "UIPickableFormRendererMixin",
     "TrackCatalogMixin",
+    "UIKeyframeSheetMixin",
     "UIReplaysLightCategoryMixin",
     "UISettingsOverlayPanelMixin",
     "WorldBlockChangeMixin",

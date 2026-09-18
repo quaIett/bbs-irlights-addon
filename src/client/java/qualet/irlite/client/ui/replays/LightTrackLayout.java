@@ -1,6 +1,5 @@
 package qualet.irlite.client.ui.replays;
 
-import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.film.replays.tracks.TrackDescriptor;
 import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.film.replays.tracks.TrackKind;
@@ -26,8 +25,8 @@ import java.util.Set;
 /**
  * How a light form's tracks look in a replay timeline: readable titles instead of raw
  * property ids, a colour and icon per family, and the tracks folded under collapsible
- * group rows that mirror the sections of the form panel (Light, Volumetric beam,
- * Shadows, Affects, Cookie, and the two "this light" profile sections).
+ * group rows that mirror the sections of the form panel (Light, Beam, Affects,
+ * Cookie, and the light's outline and volumetric profile sections).
  *
  * <p>The group rows reuse BBS's own body-part header mechanism: a {@link TrackKind#BODY_PART}
  * descriptor is a header — it names something rather than animating it, holds a throwaway
@@ -43,22 +42,21 @@ import java.util.Set;
 public final class LightTrackLayout
 {
     /** One group row: its key segment, header title and icon. */
-    private record Group(String key, String title, Icon icon) {}
+    private record Group(String key, String title, int color, Icon icon) {}
 
     /** One track's look: the group it folds under, its title, colour and icon. */
     private record Style(Group group, String title, int color, Icon icon) {}
 
-    private static final Group LIGHT = new Group("irlights.light", "Light", Icons.LIGHT);
-    private static final Group BEAM = new Group("irlights.beam", "Volumetric beam", Icons.FADING);
-    private static final Group SHADOWS = new Group("irlights.shadows", "Shadows", Icons.OUTLINE_SPHERE);
-    private static final Group AFFECTS = new Group("irlights.affects", "Affects", Icons.POINTER);
-    private static final Group COOKIE = new Group("irlights.cookie", "Cookie / gobo", Icons.IMAGE);
-    private static final Group OUTLINE_OWN = new Group("irlights.outline", "Outline (this light)", Icons.OUTLINE);
-    private static final Group BEAM_OWN = new Group("irlights.beam_own", "Volumetric (this light)", Icons.SUN);
-    private static final Group REPLAYS = new Group("irlights.replays", "Replays", Icons.PLAYER);
+    private static final Group LIGHT = new Group("irlights.light", "Light", 0xffd27f, Icons.LIGHT);
+    private static final Group BEAM = new Group("irlights.beam", "Beam", 0x44ddee, Icons.FADING);
+    private static final Group AFFECTS = new Group("irlights.affects", "Affects", 0xff5fa2, Icons.POINTER);
+    private static final Group COOKIE = new Group("irlights.cookie", "Cookie / gobo", 0x8fe066, Icons.IMAGE);
+    private static final Group OUTLINE_OWN = new Group("irlights.outline", "Outline", 0xb58cff, Icons.OUTLINE);
+    private static final Group BEAM_OWN = new Group("irlights.beam_own", "Volumetric", 0x33ccaa, Icons.SUN);
+    private static final Group REPLAYS = new Group("irlights.replays", "Replays", 0x6fa8ff, Icons.PLAYER);
 
     /** Group order in a timeline, whatever order the form registers its values in. */
-    private static final List<Group> ORDER = List.of(LIGHT, BEAM, SHADOWS, AFFECTS, COOKIE, BEAM_OWN, OUTLINE_OWN, REPLAYS);
+    private static final List<Group> ORDER = List.of(LIGHT, BEAM, AFFECTS, COOKIE, BEAM_OWN, OUTLINE_OWN, REPLAYS);
 
     /** Looks shared by both light forms, keyed by property id. */
     private static final Map<String, Style> COMMON = new LinkedHashMap<>();
@@ -81,9 +79,9 @@ public final class LightTrackLayout
         COMMON.put("anisotropy", new Style(BEAM, "Anisotropy", 0x66ccff, Icons.ARC));
         COMMON.put("vl_density", new Style(BEAM, "Density", 0x33ccaa, Icons.DROP));
 
-        /* Shadows: purple */
-        COMMON.put("shadows", new Style(SHADOWS, "Shadows", 0x9b6dff, Icons.OUTLINE_SPHERE));
-        COMMON.put("bulb_size", new Style(SHADOWS, "Bulb size (softness)", 0xb48cff, Icons.CIRCLE));
+        /* Shadow controls belong to the main light section. */
+        COMMON.put("shadows", new Style(LIGHT, "Shadows", 0x9b6dff, Icons.OUTLINE_SPHERE));
+        COMMON.put("bulb_size", new Style(LIGHT, "Softness", 0xb48cff, Icons.CIRCLE));
 
         /* Affects: pink / amber */
         COMMON.put("entities_only", new Style(AFFECTS, "Entities only", 0xff5fa2, Icons.PLAYER));
@@ -95,17 +93,17 @@ public final class LightTrackLayout
         SPOT.put("cookie_scale", new Style(COOKIE, "Cookie scale", 0x8fe066, Icons.SCALE));
         SPOT.put("cookie_invert", new Style(COOKIE, "Invert cookie", 0xa8f08a, Icons.EXCHANGE));
 
-        /* The light's own outline profile: yellows */
-        COMMON.put("custom_outline", new Style(OUTLINE_OWN, "Own outline settings", 0xffcc33, Icons.OUTLINE));
-        COMMON.put("outline", new Style(OUTLINE_OWN, "Outline", 0xffe066, Icons.OUTLINE));
-        COMMON.put("outline_target", new Style(OUTLINE_OWN, "Target (all / entities / blocks)", 0xffe066, Icons.POINTER));
-        COMMON.put("outline_strength", new Style(OUTLINE_OWN, "Strength", 0xffd54d, Icons.GRAPH));
-        COMMON.put("outline_fresnel", new Style(OUTLINE_OWN, "Fresnel falloff", 0xf0c040, Icons.ARC));
-        COMMON.put("outline_back", new Style(OUTLINE_OWN, "Back rim", 0xe6b833, Icons.ARROW_LEFT));
-        COMMON.put("outline_front", new Style(OUTLINE_OWN, "Front rim", 0xffdd77, Icons.ARROW_RIGHT));
-        COMMON.put("outline_front_strength", new Style(OUTLINE_OWN, "Front rim strength", 0xffdd77, Icons.ARROW_RIGHT));
-        COMMON.put("outline_glow", new Style(OUTLINE_OWN, "Inner glow", 0xfff0a0, Icons.SUN));
-        COMMON.put("outline_glow_strength", new Style(OUTLINE_OWN, "Glow strength", 0xfff0a0, Icons.SUN));
+        /* The light's own outline profile: violets */
+        COMMON.put("custom_outline", new Style(OUTLINE_OWN, "Own outline settings", 0x9b6dff, Icons.OUTLINE));
+        COMMON.put("outline", new Style(OUTLINE_OWN, "Outline", 0xb58cff, Icons.OUTLINE));
+        COMMON.put("outline_target", new Style(OUTLINE_OWN, "Target (all / entities / blocks)", 0xa77dff, Icons.POINTER));
+        COMMON.put("outline_strength", new Style(OUTLINE_OWN, "Strength", 0xc29aff, Icons.GRAPH));
+        COMMON.put("outline_fresnel", new Style(OUTLINE_OWN, "Fresnel falloff", 0x8f6be8, Icons.ARC));
+        COMMON.put("outline_back", new Style(OUTLINE_OWN, "Back rim", 0x7d5bd1, Icons.ARROW_LEFT));
+        COMMON.put("outline_front", new Style(OUTLINE_OWN, "Front rim", 0xc7a6ff, Icons.ARROW_RIGHT));
+        COMMON.put("outline_front_strength", new Style(OUTLINE_OWN, "Front rim strength", 0xd0b3ff, Icons.ARROW_RIGHT));
+        COMMON.put("outline_glow", new Style(OUTLINE_OWN, "Inner glow", 0xd9c2ff, Icons.SUN));
+        COMMON.put("outline_glow_strength", new Style(OUTLINE_OWN, "Glow strength", 0xe1d0ff, Icons.SUN));
 
         /* The light's own beam profile: blue-teals */
         COMMON.put("custom_vl", new Style(BEAM_OWN, "Own volumetric settings", 0x22bbdd, Icons.SUN));
@@ -121,11 +119,11 @@ public final class LightTrackLayout
         COMMON.put("vl_noise_morph", new Style(BEAM_OWN, "Noise morph", 0x57e8cc, Icons.REFRESH));
         COMMON.put("vl_shadows", new Style(BEAM_OWN, "Beam shadows", 0x66aadd, Icons.OUTLINE_SPHERE));
 
-        /* Replay lists: who this light lights / outlines. Stepped string tracks. */
-        COMMON.put("selected_light_replays", new Style(REPLAYS, "Light: selected replays only", 0xff7fb8, Icons.PLAYER));
-        COMMON.put("light_replays", new Style(REPLAYS, "Lit replays", 0xff7fb8, Icons.PLAYER));
-        COMMON.put("selected_replays", new Style(REPLAYS, "Outline: selected replays only", 0xffb0d0, Icons.OUTLINE));
-        COMMON.put("outline_replays", new Style(REPLAYS, "Outlined replays", 0xffb0d0, Icons.OUTLINE));
+        /* Replay lists: blues, distinct from the pink Affects family. */
+        COMMON.put("selected_light_replays", new Style(REPLAYS, "Light: selected replays only", 0x5f9dff, Icons.PLAYER));
+        COMMON.put("light_replays", new Style(REPLAYS, "Lit replays", 0x79b4ff, Icons.PLAYER));
+        COMMON.put("selected_replays", new Style(REPLAYS, "Outline: selected replays only", 0x7190ff, Icons.OUTLINE));
+        COMMON.put("outline_replays", new Style(REPLAYS, "Outlined replays", 0x8aa4ff, Icons.OUTLINE));
     }
 
     private LightTrackLayout()
@@ -151,6 +149,9 @@ public final class LightTrackLayout
      */
     public static void decorate(List<TrackDescriptor> tracks)
     {
+        tracks.removeIf((track) -> track.kind() == TrackKind.PROPERTY && isLight(track.owner())
+            && (track.id().subject().equals("vl_intensity") || track.id().subject().equals("vl_max_dist")));
+
         boolean any = false;
 
         for (TrackDescriptor track : tracks)
@@ -193,7 +194,7 @@ public final class LightTrackLayout
                 TrackId parent = path.isEmpty() ? null : TrackId.bodyPart(path);
 
                 out.add(new TrackDescriptor(groupId, new KeyframeChannel(groupId.toKey(), KeyframeFactories.FLOAT), track.owner(),
-                    IKey.constant(style.group().title()), style.group().icon(), BBSSettings.primaryColor(), null, null, parent));
+                    IKey.constant(style.group().title()), style.group().icon(), style.group().color(), null, null, parent));
             }
 
             out.add(new TrackDescriptor(track.id(), track.channel(), track.owner(), IKey.constant(style.title()),
@@ -202,6 +203,41 @@ public final class LightTrackLayout
 
         tracks.clear();
         tracks.addAll(out);
+    }
+
+    /** Main light and beam groups start open the first time a replay timeline is shown. */
+    public static boolean expandedByDefault(TrackDescriptor track)
+    {
+        if (track.kind() != TrackKind.BODY_PART)
+        {
+            return false;
+        }
+
+        String path = track.id().formPath();
+
+        return path.equals(LIGHT.key()) || path.endsWith(FormUtils.PATH_SEPARATOR + LIGHT.key())
+            || path.equals(BEAM.key()) || path.endsWith(FormUtils.PATH_SEPARATOR + BEAM.key());
+    }
+
+    /** BBS normally paints every header with its primary colour; our synthetic groups keep their descriptor colour. */
+    public static boolean hasCustomGroupColor(TrackDescriptor track)
+    {
+        if (track == null || track.kind() != TrackKind.BODY_PART)
+        {
+            return false;
+        }
+
+        String path = track.id().formPath();
+
+        for (Group group : ORDER)
+        {
+            if (path.equals(group.key()) || path.endsWith(FormUtils.PATH_SEPARATOR + group.key()))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

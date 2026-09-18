@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.qualet.irl.light.FramePipeline;
 import org.qualet.irl.light.iris.IrisShadersState;
 import qualet.irlite.client.diag.VlProfiler;
+import qualet.irlite.client.forms.WorldLightGuideOverlay;
 import qualet.irlite.client.light.LightCollector;
 import qualet.irlite.client.light.ReplayOutlineContext;
 
@@ -18,6 +19,7 @@ public class GameRendererLightMixin
     @Inject(method = "renderWorld", at = @At("HEAD"))
     private void irlite$collectLights(RenderTickCounter tickCounter, CallbackInfo ci)
     {
+        WorldLightGuideOverlay.beginFrame();
         // 1.21.11: renderWorld(RenderTickCounter) — the old (tickDelta, limitTime,
         // MatrixStack) parameters are gone, so derive the partial tick here
         // (ignoreFreeze=true matches the previous always-advancing behaviour).
@@ -51,6 +53,16 @@ public class GameRendererLightMixin
             VlProfiler.cpuSample("pipeline", System.nanoTime() - pipelineT0);
             VlProfiler.endPass();
         }
+    }
+
+    /** After renderWorld returns, Iris has also finished its final colour-space pass.
+     * Draw before the HUD/BBS preview capture, with the world matrices saved at submission. */
+    @Inject(method = "render", at = @At(value = "INVOKE",
+        target = "Lnet/minecraft/client/render/GameRenderer;renderWorld(Lnet/minecraft/client/render/RenderTickCounter;)V",
+        shift = At.Shift.AFTER), require = 1)
+    private void irlite$drawLightGuides(RenderTickCounter tickCounter, boolean tick, CallbackInfo ci)
+    {
+        WorldLightGuideOverlay.flush();
     }
 
     /**

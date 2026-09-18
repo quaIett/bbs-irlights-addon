@@ -105,7 +105,10 @@ final class LightGuideRenderer
         consumer.accept(builder);
 
         // Blended, no depth test — the guide reads through the model, as before.
-        Draw.flushTrianglesNoDepth(builder);
+        if (!WorldLightGuideOverlay.draw(builder))
+        {
+            Draw.flushTrianglesNoDepth(builder);
+        }
     }
 
     private static void coneWire(BufferBuilder builder, MatrixStack stack, float capZ, float radius, float t, Color color, float alpha)

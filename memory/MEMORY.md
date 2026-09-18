@@ -118,3 +118,7 @@
 Последнее09-18:4сборки IRLights1.1.7 выданы Desktop/IRLights-1.1.7;1.20.1-Java17 отдельно пересобрана,все185классов<=major61 и2232+16checks наJVM17 PASS. [[project-effects-keyframes-version-ports]].
 
 Последнее09-18: auto-keyframe гайдов Spotlight перенесён на все4MC;build+39checks каждый PASS,обе1.20.x дополнительноJVM17 PASS.4JAR Desktop/IRLights-1.1.7-autokeyframes;весь байткод1.20.x=61,1.21.x=65. Чекпоинт+порты по запросу,без push. [[project-spot-guide-autokeyframes]].
+
+Последнее09-18: для1.21.11 подготовлен фикс мировых гайдов с шейдерами: overlay после Iris;build/API/bundle PASS,игровая проверка OPEN. Остальные версии и стрелкиBBS не менялись;без commit/push. [[fix-world-light-guides-shaders-12111]].
+
+Последнее09-18: фикс гайдов с шейдерами перенесён на все4MC;4build,79snapshot/APIchecks,bundle/Java17/21 PASS.4JAR Desktop/IRLights-1.1.7-shader-guides. По запросу — коммиты;runtime OPEN. [[fix-world-light-guides-shaders-12111]].

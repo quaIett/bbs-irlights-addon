@@ -36,7 +36,7 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
 
     protected abstract Icon icon();
 
-    protected abstract void renderGuide(FormRenderingContext context, Color color);
+    protected abstract void renderGuide(FormRenderingContext context, Color color, boolean world);
 
     /** Register this light into the per-frame registry (render-path: live actors / replays). */
     protected abstract void registerLight(FormRenderingContext context);
@@ -92,7 +92,7 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
              * identity checks against the replay don't work here). */
             if (IrliteConfig.showGuides() || SpotGuideDrag.isFilmSelected(this.form))
             {
-                this.renderGuide(context, this.tintedColor(context));
+                this.renderGuide(context, this.tintedColor(context), true);
             }
 
             return;
@@ -100,7 +100,7 @@ public abstract class AbstractLightFormRenderer<T extends Form> extends FormRend
 
         if (editorPreview && !context.isPicking())
         {
-            this.renderGuide(context, this.tintedColor(context));
+            this.renderGuide(context, this.tintedColor(context), false);
 
             return;
         }

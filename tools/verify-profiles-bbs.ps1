@@ -32,11 +32,16 @@ $fixturePath = Join-Path $boundary 'BBSMod.java'
 [IO.File]::WriteAllText($fixturePath, $fixture)
 $classpath = [IO.File]::ReadAllText((Join-Path $output 'classpath.txt')).Replace('\', '/')
 $compileArgs = @('--release', '17', '-encoding', 'UTF-8', '-proc:none', '-cp', ('"' + $classpath + '"'), '-d', ('"' + $classes.Replace('\', '/') + '"'))
-$compileArgs += @($fixturePath, (Join-Path $PSScriptRoot 'profiles/ProfilesBbsTest.java'), (Join-Path $PSScriptRoot 'profiles/ReplayPortApiCheck.java')) | ForEach-Object { '"' + $_.Replace('\', '/') + '"' }
+$compileArgs += @($fixturePath, (Join-Path $PSScriptRoot 'profiles/ProfilesBbsTest.java'), (Join-Path $PSScriptRoot 'profiles/ReplayPortApiCheck.java'), (Join-Path $PSScriptRoot 'profiles/BodyPartEntityFixture.java')) | ForEach-Object { '"' + $_.Replace('\', '/') + '"' }
 $argFile = Join-Path $output 'compile.args'
 [IO.File]::WriteAllLines($argFile, $compileArgs)
 & (Join-Path $JavaHome 'bin/javac.exe') "@$argFile"
 if ($LASTEXITCODE -ne 0) { throw 'BBS profiles test compilation failed' }
+$fixtureArgs = Join-Path $output 'entity-fixture.args'
+# Production classpath first: never transform a fixture left by an earlier run.
+[IO.File]::WriteAllLines($fixtureArgs, @('-cp', ('"' + $classpath + ';' + $classes.Replace('\', '/') + '"'), 'BodyPartEntityFixture', ('"' + $classes.Replace('\', '/') + '"')))
+& (Join-Path $JavaHome 'bin/java.exe') "@$fixtureArgs"
+if ($LASTEXITCODE -ne 0) { throw 'Body-part entity fixture generation failed' }
 $runFile = Join-Path $output 'run.args'
 [IO.File]::WriteAllLines($runFile, @('-cp', ('"' + $classes.Replace('\', '/') + ';' + $classpath + '"'), 'qualet.irlite.client.light.ProfilesBbsTest', ('"' + (Join-Path $output 'report.json').Replace('\', '/') + '"')))
 Push-Location $output

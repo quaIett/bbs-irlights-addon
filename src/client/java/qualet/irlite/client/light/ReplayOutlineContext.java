@@ -6,6 +6,7 @@ import mchorse.bbs_mod.film.BaseFilmController;
 import mchorse.bbs_mod.film.Films;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.forms.entities.IEntity;
+import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.renderers.FormRenderer;
 import mchorse.bbs_mod.forms.renderers.FormRenderingContext;
 import mchorse.bbs_mod.forms.renderers.ModelFormRenderer;
@@ -32,7 +33,8 @@ import java.util.Map;
  * The patched gbuffers write it (with depth) into an extra colour attachment for the
  * deferred outline; the forward surface pass reads the uniform directly.</p>
  *
- * <p>Nested body parts render with their actor's entity and so inherit its tag. Vanilla
+ * <p>Body parts may use their own entity. Their form ancestry identifies the owning
+ * replay even when BBS postpones a part until the end of the render pass. Vanilla
  * batches entity geometry, so the batch is flushed at every tag change — otherwise a
  * form's triangles would be drawn later, under whatever tag was current then.</p>
  *
@@ -44,6 +46,8 @@ public final class ReplayOutlineContext
 {
     /** Entities drawn this frame -> their token. Identity: an IEntity is not a value. */
     private static final IdentityHashMap<IEntity, Integer> ENTITIES = new IdentityHashMap<>();
+    /** Runtime root forms -> replay token, for parts with a private render entity. */
+    private static final IdentityHashMap<Form, Integer> FORMS = new IdentityHashMap<>();
     /** Tokens ever handed out in this world: film id -> replay id -> token. */
     private static final Map<String, Map<String, Integer>> TOKENS = new HashMap<>();
     /** Tokens of the replays that actually have an entity this frame. */
@@ -89,6 +93,7 @@ public final class ReplayOutlineContext
         }
 
         ENTITIES.clear();
+        FORMS.clear();
         ACTIVE.clear();
         set(0);
 
@@ -144,8 +149,35 @@ public final class ReplayOutlineContext
             }
 
             ENTITIES.put(entity, token);
+            if (entity.getForm() != null)
+            {
+                FORMS.put(entity.getForm(), token);
+            }
             active.put(replay.getId(), token);
         }
+    }
+
+    /** Resolve ownership from the actual form tree, never from the preceding draw. */
+    static int renderId(Form form, IEntity entity)
+    {
+        Integer token = ENTITIES.get(entity);
+
+        if (token != null)
+        {
+            return token;
+        }
+
+        for (Form owner = form; owner != null; owner = owner.getParentForm())
+        {
+            token = FORMS.get(owner);
+
+            if (token != null)
+            {
+                return token;
+            }
+        }
+
+        return 0;
     }
 
     private static void set(int id)
@@ -164,14 +196,14 @@ public final class ReplayOutlineContext
     }
 
     /**
-     * Render {@code renderer} under the tag of the context's entity. Called in place of
+     * Render {@code renderer} under its entity's or owning root form's replay tag. Called in place of
      * {@code FormRenderer.render} by {@code FormUtilsClientMixin}.
      */
     public static void render(FormRenderer<?> renderer, FormRenderingContext context)
     {
         int previous = currentId;
         boolean untagged = context.ui || context.isPicking() || BBSRendering.isIrisShadowPass() || ShadowBakeState.isBaking();
-        int id = untagged ? 0 : ENTITIES.getOrDefault(context.entity, 0);
+        int id = untagged ? 0 : renderId(renderer.getForm(), context.entity);
 
         if (id == previous)
         {

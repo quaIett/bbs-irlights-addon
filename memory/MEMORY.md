@@ -145,3 +145,9 @@
 Последнее09-18: гайды Spotlight учитывают auto-keyframe BBS2.6: ключ на курсоре/пустой трек,undo/sync;master1.20.4 build+39checks PASS. Runtime OPEN,без commit/push. [[project-spot-guide-autokeyframes]].
 
 Последнее09-18: auto-keyframe гайдов Spotlight перенесён на все4MC;build+39checks каждый PASS,обе1.20.x дополнительноJVM17 PASS.4JAR Desktop/IRLights-1.1.7-autokeyframes;весь байткод1.20.x=61,1.21.x=65. Чекпоинт+порты по запросу,без push. [[project-spot-guide-autokeyframes]].
+
+Последнее09-18: для1.21.11 подготовлен фикс мировых гайдов с шейдерами: overlay после Iris;build/API/bundle PASS,игровая проверка OPEN. Остальные версии и стрелкиBBS не менялись;без commit/push. [[fix-world-light-guides-shaders-12111]].
+
+Последнее09-18: code-only аудит1.20.1/1.20.4/1.21.1: дефекта неподключённого pipeline нет,но мировые гайды уязвимы к раннему проходу+depthMask(false);Photon может скрывать их на небе. СтрелкиBBS film UI рисуются позже;код не менялся. [[fix-world-light-guides-shaders-12111]].
+
+Последнее09-18: фикс гайдов с шейдерами перенесён на все4MC;4build,79snapshot/APIchecks,bundle/Java17/21 PASS.4JAR Desktop/IRLights-1.1.7-shader-guides. По запросу — коммиты;runtime OPEN. [[fix-world-light-guides-shaders-12111]].

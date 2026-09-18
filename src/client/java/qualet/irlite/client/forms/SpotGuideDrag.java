@@ -1,6 +1,6 @@
 package qualet.irlite.client.forms;
 
-import mchorse.bbs_mod.film.replays.tracks.TrackId;
+import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.camera.Camera;
 import mchorse.bbs_mod.camera.CameraUtils;
@@ -15,12 +15,8 @@ import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.UIScreen;
 import mchorse.bbs_mod.ui.utils.Area;
 import mchorse.bbs_mod.ui.utils.StencilFormFramebuffer;
-import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.numeric.ValueFloat;
 import mchorse.bbs_mod.utils.Pair;
-import mchorse.bbs_mod.utils.keyframes.Keyframe;
-import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
-import mchorse.bbs_mod.utils.keyframes.KeyframeSegment;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.MatrixStack;
 import org.joml.Matrix4f;
@@ -74,15 +70,11 @@ public final class SpotGuideDrag
     private static Camera dragCamera;
     private static Area dragViewport;
 
-    /**
-     * Film drags are KEYFRAME edits: the write target is the keyframe governing
-     * the playhead in the property's channel of the selected replay. No channel
-     * or no keyframes — the handle refuses to drag (film values are keyframe-
-     * driven; a static write would be stomped by applyProperties every frame).
-     * Null while dragging in the form-editor preview, which edits the form
-     * values directly.
-     */
-    private static Keyframe dragKeyframe;
+    /** Null in the form preview; film gestures follow BBS's auto-keyframe setting. */
+    private static SpotGuideKeyframes filmKeyframes;
+    private static int dragMouseX;
+    private static int dragMouseY;
+    private static boolean dragMoved;
 
     private SpotGuideDrag()
     {}
@@ -141,9 +133,9 @@ public final class SpotGuideDrag
         }
 
         /* Keyframe gate: dragging in the film edits keyframes only. */
-        dragKeyframe = resolveFilmKeyframe(controller);
+        filmKeyframes = resolveFilmKeyframes(controller);
 
-        if (dragKeyframe == null)
+        if (filmKeyframes == null)
         {
             stop();
 
@@ -154,11 +146,10 @@ public final class SpotGuideDrag
     }
 
     /**
-     * The keyframe the drag will edit: in the selected replay's channel for the
-     * dragged property, the keyframe governing the current playhead position.
-     * Null when the property has no channel or no keyframes.
+     * Resolve the replay track without creating a key on a click alone.
+     * With auto-keyframing off, retain the existing governing-keyframe behavior.
      */
-    private static Keyframe resolveFilmKeyframe(UIFilmController controller)
+    private static SpotGuideKeyframes resolveFilmKeyframes(UIFilmController controller)
     {
         Replay replay = selectedReplay();
 
@@ -167,26 +158,15 @@ public final class SpotGuideDrag
             return null;
         }
 
-        BaseValue property = switch (dragHandle)
+        ValueFloat property = switch (dragHandle)
         {
             case HANDLE_RANGE -> dragForm.range;
             case HANDLE_INNER -> dragForm.innerRadius;
             default -> dragForm.radius;
         };
 
-        String key = FormUtils.getPropertyPath(property);
-        // BBS 2.6 addresses tracks by TrackId; this is FormProperties' own lookup.
-        TrackId track = key == null ? null : TrackId.parse(key);
-        KeyframeChannel channel = track == null ? null : replay.properties.get(track);
-
-        if (channel == null || channel.isEmpty())
-        {
-            return null;
-        }
-
-        KeyframeSegment segment = channel.findSegment(controller.panel.getCursor());
-
-        return segment == null ? null : segment.a;
+        return SpotGuideKeyframes.begin(replay.properties, property,
+            controller.panel.getCursor(), BBSSettings.autoKeyframe.get());
     }
 
     private static boolean tryStartWith(Object host, StencilFormFramebuffer stencil, Camera camera, Area viewport, UIContext context)
@@ -213,6 +193,9 @@ public final class SpotGuideDrag
         dragHost = host;
         dragCamera = camera;
         dragViewport = viewport;
+        dragMouseX = context.mouseX;
+        dragMouseY = context.mouseY;
+        dragMoved = false;
 
         return true;
     }
@@ -232,12 +215,17 @@ public final class SpotGuideDrag
 
     public static void stop()
     {
+        if (filmKeyframes != null)
+        {
+            filmKeyframes.finish();
+        }
+
         dragForm = null;
         dragHandle = null;
         dragHost = null;
         dragCamera = null;
         dragViewport = null;
-        dragKeyframe = null;
+        filmKeyframes = null;
     }
 
     /**
@@ -252,6 +240,13 @@ public final class SpotGuideDrag
         }
 
         if (host instanceof UIFilmController controller && controller.panel.isFlying())
+        {
+            return;
+        }
+
+        dragMoved |= context.mouseX != dragMouseX || context.mouseY != dragMouseY;
+
+        if (filmKeyframes != null && !dragMoved)
         {
             return;
         }
@@ -372,16 +367,15 @@ public final class SpotGuideDrag
     }
 
     /**
-     * Lands the dragged value: film drags write the governing keyframe (the
+     * Lands the dragged value: film drags write the target keyframe (the
      * per-frame applyProperties then propagates it into the rendered copy),
      * preview drags write the edited form's value directly.
      */
-    @SuppressWarnings("unchecked")
     private static void writeValue(float value, ValueFloat directTarget)
     {
-        if (dragKeyframe != null)
+        if (filmKeyframes != null)
         {
-            dragKeyframe.setValue(value);
+            filmKeyframes.write(value, ((UIFilmController) dragHost).panel.getCursor());
         }
         else
         {

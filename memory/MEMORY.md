@@ -137,3 +137,9 @@
 Последнее09-18: ограниченные слайдеры только для ключей15параметров по GPU/GLSL-пределам;обычная интенсивность свободна. MC1.20.1/1.20.4 build/2232checks+12anchors/bundle PASS;новый запуск/UI приёмка OPEN. [[investigation-effects-keyframes-master]].
 
 Последнее09-18: клиент1.20.4 запущен из основной папки с ключами/слайдерами;трек толщины переименован в «Thickness» без скобок. Повтор2232checks+12anchors PASS. Пользователь поручил коммит текущих исправлений master,без push. [[investigation-effects-keyframes-master]].
+
+Последнее09-18: все изменения replay UI/Volumetric/Outline/Thickness/слайдеров master перенесены на1.20.1/1.21.1/1.21.11;каждая build/2232checks+16anchors/bundle PASS. Выдача replay-effects-1.1.7,базовая1.20.4 тоже обновлена;runtime портов OPEN,без новых commit/push. [[project-effects-keyframes-version-ports]].
+
+Последнее09-18:4сборки IRLights1.1.7 выданы Desktop/IRLights-1.1.7;1.20.1-Java17 отдельно пересобрана,все185классов<=major61 и2232+16checks наJVM17 PASS. [[project-effects-keyframes-version-ports]].
+
+Последнее09-18: гайды Spotlight учитывают auto-keyframe BBS2.6: ключ на курсоре/пустой трек,undo/sync;master1.20.4 build+39checks PASS. Runtime OPEN,без commit/push. [[project-spot-guide-autokeyframes]].

@@ -152,4 +152,10 @@
 
 Последнее09-18: фикс гайдов с шейдерами перенесён на все4MC;4build,79snapshot/APIchecks,bundle/Java17/21 PASS.4JAR Desktop/IRLights-1.1.7-shader-guides. По запросу — коммиты;runtime OPEN. [[fix-world-light-guides-shaders-12111]].
 
+Последнее09-18: обновлены6shaderpack-баз из Prism1.21.11(2),патчи CRr5.9.3/BSL10.1.5/Solas3.7b и метаданные;Original/Modification+редактор+patches.zip синхронизированы.2468roundtrip/GPU без новых ошибок;6готовых *_IRLights в Prism. Runtime OPEN,без commit/push/JAR. [[project-shader-pack-update-20260918]].
+
+Последнее09-18: новые shader-патчи встроены во все4addon+5editor1.1.7;9build/bundle/Java17-21/63patchcopies PASS. Выдача Desktop/IRLights-1.1.7-new-shaders. Runtime NOT_RUN,без commit/push;MavenLocal release1.20.x. [[project-shader-pack-update-20260918]].
+
 Последнее09-18: исправлены Lit/Outline Replays для вложенных BodyPart(useTarget=false/RenderLast): все4MC build,8972BBS+72APIchecks,bundle/Java17-21 PASS.4JAR Desktop/IRLights-1.1.7-bodyparts. Runtime OPEN;по запросу пользователя закоммичено в3ветках addon,без push. [[fix-replay-bodypart-targets]].
+
+Последнее09-18: по запросу «коммитим вообще всё» сохранён общий чекпоинт: шейдеры3addon+5editor,профайлерcore2.0,логи3core-портов. Рабочие копии трилогии чистые;stash сохранены,без push. Runtime OPEN. [[project-shader-pack-update-20260918]].

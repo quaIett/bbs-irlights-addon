@@ -142,6 +142,7 @@ function EmitFile($relPath, $text) {
 Emit '# IRLite point + spot lights for Complementary (Reimagined/Unbound, by EminGT).'
 Emit '@name    Complementary lights'
 Emit '@target  ComplementaryReimagined'
+Emit '@packversion r5.9.3'
 Emit '@irlite  1'
 Emit '@marker  IRLITE'
 Emit ''

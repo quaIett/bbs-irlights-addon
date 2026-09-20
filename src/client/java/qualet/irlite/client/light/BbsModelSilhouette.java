@@ -72,6 +72,10 @@ public final class BbsModelSilhouette
     private CasterRevision sampleEvaluated(ModelBlockEntity block, float tickDelta)
     {
         if (!AUDITED) return unknown("BBS version/layout not audited");
+        // BBS 2.7: an addon on a pose event may move the form, its bones or its anchor from state
+        // of its own, which no signature of ours sees.
+        int poseListeners = BbsSilhouetteBridge.poseListeners();
+        if (poseListeners != 0) return unknown("addon pose listeners registered: " + poseListeners);
         if (block.getProperties() == null) return unknown("model block without properties");
         if (BbsSilhouetteBridge.debugOverlays()) return unknown("IK/physics debug overlay enabled");
         if (!(block.getProperties().getForm() instanceof ModelForm form) || form.getClass() != ModelForm.class)

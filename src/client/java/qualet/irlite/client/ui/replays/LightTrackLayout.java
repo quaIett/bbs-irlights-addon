@@ -6,33 +6,31 @@ import mchorse.bbs_mod.film.replays.tracks.TrackKind;
 import mchorse.bbs_mod.forms.FormUtils;
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.l10n.keys.IKey;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.ui.utils.icons.Icon;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
-import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
-import mchorse.bbs_mod.utils.keyframes.factories.KeyframeFactories;
 import qualet.irlite.forms.LightForm;
 import qualet.irlite.forms.SpotlightForm;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * How a light form's tracks look in a replay timeline: readable titles instead of raw
- * property ids, a colour and icon per family, and the tracks folded under collapsible
- * group rows that mirror the sections of the form panel (Light, Beam, Affects,
- * Cookie, and the light's outline and volumetric profile sections).
+ * property ids, a colour and icon per family, and the tracks gathered into collapsible
+ * sections that mirror the sections of the form panel (Light, Beam, Affects, Cookie, and
+ * the light's outline and volumetric profile sections).
  *
- * <p>The group rows reuse BBS's own body-part header mechanism: a {@link TrackKind#BODY_PART}
- * descriptor is a header — it names something rather than animating it, holds a throwaway
- * channel that is never saved, folds/unfolds in the dope sheet and is pruned when every
- * track under it is filtered away. The header's key is the light's form path plus a group
- * id, so a light nested as a body part gets its groups folded under the part's own row.</p>
+ * <p>The sections are BBS 2.7's own {@link UIKeyframeSheet.Section}: a coloured, foldable
+ * row the dope sheet draws above the first track carrying it, summarising the keyframes
+ * underneath. Until 2.7 the same thing had to be built by hand out of body-part header
+ * descriptors, which are gone along with the body-part rows themselves. The section is
+ * put on the sheet by {@code UIKeyframeSheetMixin}, since a section belongs to a
+ * timeline row rather than to the catalog entry behind it.</p>
  *
  * <p>Applied by {@code TrackCatalogMixin} to the list {@code TrackCatalog.of} returns, so
  * every consumer of the catalog (replay editor, animation state editor, the per-form
@@ -41,24 +39,30 @@ import java.util.Set;
  */
 public final class LightTrackLayout
 {
-    /** One group row: its key segment, header title and icon. */
+    /** One group: its key segment, section title and icon. */
     private record Group(String key, String title, int color, Icon icon) {}
 
-    /** One track's look: the group it folds under, its title, colour and icon. */
+    /** One track's look: the group it sits in, its title, colour and icon. */
     private record Style(Group group, String title, int color, Icon icon) {}
 
-    private static final Group LIGHT = new Group("irlights.light", "Light", 0xffd27f, Icons.LIGHT);
-    private static final Group BEAM = new Group("irlights.beam", "Beam", 0x44ddee, Icons.FADING);
-    private static final Group AFFECTS = new Group("irlights.affects", "Affects", 0xff5fa2, Icons.POINTER);
-    private static final Group COOKIE = new Group("irlights.cookie", "Cookie / gobo", 0x8fe066, Icons.IMAGE);
-    private static final Group OUTLINE_OWN = new Group("irlights.outline", "Outline", 0xb58cff, Icons.OUTLINE);
-    private static final Group BEAM_OWN = new Group("irlights.beam_own", "Volumetric", 0x33ccaa, Icons.SUN);
+    /** Section ids are namespaced like everything else an addon registers. */
+    private static final String SECTION_PREFIX = "irlights_section/";
+
+    private static final Group LIGHT = new Group("light", "Light", 0xffd27f, Icons.LIGHT);
+    private static final Group BEAM = new Group("beam", "Beam", 0x44ddee, Icons.FADING);
+    private static final Group AFFECTS = new Group("affects", "Affects", 0xff5fa2, Icons.POINTER);
+    private static final Group COOKIE = new Group("cookie", "Cookie / gobo", 0x8fe066, Icons.IMAGE);
+    private static final Group OUTLINE_OWN = new Group("outline", "Outline", 0xb58cff, Icons.OUTLINE);
+    private static final Group BEAM_OWN = new Group("volumetric", "Volumetric", 0x33ccaa, Icons.SUN);
 
     /** Group order in a timeline, whatever order the form registers its values in. */
     private static final List<Group> ORDER = List.of(LIGHT, BEAM, AFFECTS, COOKIE, BEAM_OWN, OUTLINE_OWN);
 
     /** Looks shared by both light forms, keyed by property id. */
     private static final Map<String, Style> COMMON = new LinkedHashMap<>();
+    /** One section instance per light and group: the dope sheet folds and draws them by identity. */
+    private static final Map<String, UIKeyframeSheet.Section> SECTIONS = new HashMap<>();
+
     /** Looks that differ or exist only on one form. */
     private static final Map<String, Style> POINT = new HashMap<>();
     private static final Map<String, Style> SPOT = new HashMap<>();
@@ -144,33 +148,35 @@ public final class LightTrackLayout
 
     /**
      * Rewrite the light forms' property tracks in {@code tracks} (in place): titled, coloured,
-     * and folded under freshly inserted group headers. Tracks of other forms, and BBS's own
-     * properties of a light form, are passed through untouched.
+     * and ordered so each light's tracks come out group by group. Tracks of other forms, and
+     * BBS's own properties of a light form, are passed through untouched.
+     *
+     * <p>Also leaves the addresses of the light tracks it saw with {@link LightReplayTracks},
+     * which is how the "Light" tab knows which tracks are its own.</p>
      */
     public static void decorate(List<TrackDescriptor> tracks)
     {
         tracks.removeIf((track) -> track.kind() == TrackKind.PROPERTY && isLight(track.owner())
             && (track.id().subject().equals("vl_intensity") || track.id().subject().equals("vl_max_dist")));
 
-        boolean any = false;
+        List<TrackId> own = new ArrayList<>();
 
         for (TrackDescriptor track : tracks)
         {
-            if (isLight(track.owner()))
+            if (LightReplayTracks.owns(track))
             {
-                any = true;
-
-                break;
+                own.add(track.id());
             }
         }
 
-        if (!any)
+        LightReplayTracks.remember(own);
+
+        if (own.isEmpty())
         {
             return;
         }
 
-        List<TrackDescriptor> out = new ArrayList<>(tracks.size() + 8);
-        Set<TrackId> headers = new HashSet<>();
+        List<TrackDescriptor> out = new ArrayList<>(tracks.size());
 
         for (TrackDescriptor track : sortedByGroup(tracks))
         {
@@ -185,59 +191,55 @@ public final class LightTrackLayout
                 continue;
             }
 
-            String path = track.id().formPath();
-            TrackId groupId = new TrackId(TrackKind.BODY_PART, StringUtilsCombine(path, style.group().key()), "", "");
-
-            if (headers.add(groupId))
-            {
-                /* A nested light's groups hang off the part's own header row; a root light's stand alone. */
-                TrackId parent = path.isEmpty() ? null : TrackId.bodyPart(path);
-
-                out.add(new TrackDescriptor(groupId, new KeyframeChannel(groupId.toKey(), KeyframeFactories.FLOAT), track.owner(),
-                    IKey.constant(style.group().title()), style.group().icon(), style.group().color(), null, null, parent));
-            }
-
             out.add(new TrackDescriptor(track.id(), track.channel(), track.owner(), IKey.constant(style.title()),
-                style.icon(), style.color(), track.property(), track.seed(), groupId));
+                style.icon(), style.color(), track.property(), track.seed(), track.parent()));
         }
 
         tracks.clear();
         tracks.addAll(out);
     }
 
-    /** Main light and beam groups start open the first time a replay timeline is shown. */
-    public static boolean expandedByDefault(TrackDescriptor track)
+    /**
+     * The collapsible section a light's track sits in, or null for anything else.
+     *
+     * <p>BBS 2.7 draws a section row of its own above the first sheet carrying it — the same
+     * foldable, coloured, keyframe-summarising row this used to build by hand out of body-part
+     * headers, which are gone. The id carries the light's form path, so two lights in one
+     * timeline fold apart.</p>
+     */
+    public static UIKeyframeSheet.Section sectionFor(TrackDescriptor track)
     {
-        if (track.kind() != TrackKind.BODY_PART)
-        {
-            return false;
-        }
+        Style style = track != null && track.kind() == TrackKind.PROPERTY && isLight(track.owner())
+            ? styleFor(track.owner(), track.id().subject())
+            : null;
 
-        String path = track.id().formPath();
-
-        return path.equals(LIGHT.key()) || path.endsWith(FormUtils.PATH_SEPARATOR + LIGHT.key())
-            || path.equals(BEAM.key()) || path.endsWith(FormUtils.PATH_SEPARATOR + BEAM.key());
+        return style == null ? null : section(track.id().formPath(), style.group());
     }
 
-    /** BBS normally paints every header with its primary colour; our synthetic groups keep their descriptor colour. */
-    public static boolean hasCustomGroupColor(TrackDescriptor track)
+    /** Main light and beam sections start open the first time a replay timeline is shown. */
+    public static String expandedByDefault(TrackDescriptor track)
     {
-        if (track == null || track.kind() != TrackKind.BODY_PART)
+        Style style = track != null && track.kind() == TrackKind.PROPERTY && isLight(track.owner())
+            ? styleFor(track.owner(), track.id().subject())
+            : null;
+
+        if (style == null || (style.group() != LIGHT && style.group() != BEAM))
         {
-            return false;
+            return null;
         }
 
-        String path = track.id().formPath();
+        return sectionId(track.id().formPath(), style.group());
+    }
 
-        for (Group group : ORDER)
-        {
-            if (path.equals(group.key()) || path.endsWith(FormUtils.PATH_SEPARATOR + group.key()))
-            {
-                return true;
-            }
-        }
+    private static UIKeyframeSheet.Section section(String path, Group group)
+    {
+        return SECTIONS.computeIfAbsent(sectionId(path, group),
+            (id) -> new UIKeyframeSheet.Section(id, IKey.constant(group.title()), group.icon(), group.color()));
+    }
 
-        return false;
+    private static String sectionId(String path, Group group)
+    {
+        return SECTION_PREFIX + StringUtilsCombine(path, group.key());
     }
 
     /**

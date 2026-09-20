@@ -9,7 +9,7 @@ $env:JAVA_HOME = $JavaHome
 Push-Location $repo
 try {
     & .\gradlew.bat profileTestClasspath "-Pmc=$MinecraftVersion" -I tools/profiles/classpath.init.gradle --console=plain
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the current BBS 2.6 test classpath' }
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the current BBS 2.7 test classpath' }
 } finally { Pop-Location }
 $output = Join-Path $repo 'build/profiles-bbs-test'
 $classes = Join-Path $output 'classes'

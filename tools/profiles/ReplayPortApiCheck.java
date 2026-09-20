@@ -34,7 +34,7 @@ public final class ReplayPortApiCheck {
         String b = "mchorse/bbs_mod/", editor = b + "ui/film/replays/UIReplaysEditor";
         String keyEditors = b + "ui/framework/elements/input/keyframes/";
         method(keyEditors + "factories/UIKeyframeFactory", "createPanel", "(L" + b + "utils/keyframes/Keyframe;L" + keyEditors + "UIKeyframes;)L" + keyEditors + "factories/UIKeyframeFactory;");
-        method(keyEditors + "UIKeyframeSheet", "getRowColor", "()I");
+        method(keyEditors + "UIKeyframeSheet", "<init>", "(L" + b + "film/replays/tracks/TrackDescriptor;)V");
         method(editor, "getExpandedTracks", "()L" + b + "ui/framework/elements/input/items/FoldState;");
         if (read(keyEditors + "UIKeyframeSheet").fields.stream().noneMatch(f -> f.name.equals("descriptor")
                 && f.desc.equals("L" + b + "film/replays/tracks/TrackDescriptor;")
@@ -45,13 +45,21 @@ public final class ReplayPortApiCheck {
                 && f.desc.equals("Ljava/util/Map;") && (f.access & org.objectweb.asm.Opcodes.ACC_FINAL) != 0))
             throw new AssertionError("UIReplaysEditor.expandedTracksByReplay anchor missing");
         checks++;
-        String category = editor + "$ReplayCategory";
-        method(category, "<init>", "(Ljava/lang/String;IL" + b + "ui/utils/icons/Icon;L" + b + "l10n/keys/IKey;L" + b + "l10n/keys/IKey;)V");
-        if (read(category).fields.stream().noneMatch(f -> f.name.equals("$VALUES") && f.desc.equals("[L" + category + ";")))
-            throw new AssertionError("ReplayCategory.$VALUES missing");
+        /* The timeline's own tabs and sections, which BBS 2.7 turned from an enum and hand-built
+         * body-part header rows into registered addon contracts. */
+        String categories = b + "api/client/editor/TrackCategories", categoryType = b + "api/client/editor/TrackCategory";
+        String predicate = "Ljava/util/function/BiPredicate;";
+        method(categoryType, "<init>", "(Ljava/lang/String;L" + b + "ui/utils/icons/Icon;L" + b + "l10n/keys/IKey;L" + b + "l10n/keys/IKey;)V");
+        method(categories, "register", "(L" + categoryType + ";" + predicate + ")V");
+        method(categories, "categoryOf", "(L" + b + "film/replays/tracks/TrackId;Z)L" + categoryType + ";");
+        method(b + "api/client/events/RegisterTrackCategoriesEvent", "register", "(L" + categoryType + ";" + predicate + ")V");
+        String section = keyEditors + "UIKeyframeSheet$Section";
+        method(section, "<init>", "(Ljava/lang/String;L" + b + "l10n/keys/IKey;L" + b + "ui/utils/icons/Icon;I)V");
+        if (read(keyEditors + "UIKeyframeSheet").fields.stream().noneMatch(f -> f.name.equals("section")
+                && f.desc.equals("L" + section + ";")
+                && (f.access & org.objectweb.asm.Opcodes.ACC_FINAL) == 0))
+            throw new AssertionError("UIKeyframeSheet.section anchor missing");
         checks++;
-        method(editor, "categoryOf", "(L" + b + "ui/framework/elements/input/keyframes/UIKeyframeSheet;)L" + category + ";");
-        calls(method(editor, "updateChannelsList", "()V"), editor, "updateTab", "(L" + category + ";Ljava/util/List;)V", 2);
         method(b + "film/replays/tracks/TrackCatalog", "of", "(L" + b + "forms/forms/Form;L" + b + "film/replays/FormProperties;)Ljava/util/List;");
         method(b + "film/replays/tracks/behaviours/PropertyTrack", "apply", "(L" + b + "film/replays/tracks/TrackContext;L" + b + "film/replays/tracks/TrackId;L" + b + "utils/keyframes/KeyframeChannel;FF)V");
         String renderer = b + "forms/renderers/FormRenderer", context = "(L" + b + "forms/renderers/FormRenderingContext;)V";

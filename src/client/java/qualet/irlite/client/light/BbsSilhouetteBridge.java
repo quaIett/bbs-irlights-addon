@@ -1,10 +1,12 @@
 package qualet.irlite.client.light;
 
+import mchorse.bbs_mod.api.client.events.FormPoseEvents;
 import mchorse.bbs_mod.cubic.ModelInstance;
 import mchorse.bbs_mod.cubic.data.model.ModelGroup;
 import mchorse.bbs_mod.cubic.ik.ModelIKDebug;
 import mchorse.bbs_mod.cubic.model.View;
 import mchorse.bbs_mod.cubic.physics.ModelPhysicsDebug;
+import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.utils.pose.Transform;
 import net.fabricmc.loader.api.FabricLoader;
@@ -62,6 +64,27 @@ public final class BbsSilhouetteBridge
     static final MethodHandle OFFSET = field(ModelGroup.class, "offset", Vector3f.class);
     static final MethodHandle OFFSET_SETTER = setter(ModelGroup.class, "offset", Vector3f.class);
 
+    /* 2.7 markers: per-bone procedural assignments on the model config, and the pose overlay
+     * tracks a form grows from the recording settings. Both are read directly elsewhere; here they
+     * only prove the host is the 2.7 layout this audit walked. */
+    static final MethodHandle PROCEDURAL_BONES = method(ModelInstance.class, "getProceduralBones", Map.class);
+    static final MethodHandle ADDITIONAL_OVERLAYS = field(Form.class, "additionalOverlays", List.class);
+
+    /**
+     * 2.7's pose extension points. A listener on any of them may move a form's transform, its
+     * bones or its anchor from state of its own — a physics addon stepping a simulation is the
+     * stated use — and none of that state is in our signature, so a single registered listener
+     * makes every caster UNKNOWN rather than a frozen silhouette.
+     *
+     * <p>Fabric keeps an event's listeners in a private array; reading its length is the only way
+     * to ask "is anybody on this event". If that read is not available the version is not audited
+     * at all, rather than silently assuming an empty event.</p>
+     */
+    private static final Object[] POSE_EVENTS = {FormPoseEvents.TRANSFORM, FormPoseEvents.PARENT_FRAME,
+        FormPoseEvents.MODEL_POSE, FormPoseEvents.CLAIM_CHAIN, FormPoseEvents.PIVOT_OFFSETS,
+        FormPoseEvents.ANCHOR, FormPoseEvents.ACTOR_BEFORE};
+    private static final MethodHandle EVENT_HANDLERS = eventHandlers();
+
     /* 2.3.1 only: global debug overlays drawn by the model renderer. 2.5.2 gates its overlays on
      * a compiled IK/physics config, which the sampler already requires to be empty. */
     static final MethodHandle IK_DEBUG = staticFlag(ModelIKDebug.class, "enabled");
@@ -85,15 +108,16 @@ public final class BbsSilhouetteBridge
         require(missing, "ModelInstance.itemsMain", ITEMS_MAIN);
         require(missing, "ModelInstance.itemsOff", ITEMS_OFF);
         require(missing, "ModelInstance.armorSlots", ARMOR_SLOTS);
+        require(missing, "FormPoseEvents listener probe", EVENT_HANDLERS);
         boolean legacyLayout = ROTATE2 != null && ROTATION_MODE == null && QUAT == null && OFFSET == null && WELD_BINDINGS == null;
         boolean modernLayout = ROTATE2 == null && ROTATION_MODE != null && QUAT != null
             && OFFSET != null && OFFSET_SETTER != null && WELD_BINDINGS != null;
-        String layout = switch (BBS_VERSION)
-        {
-            // This build targets the BBS 2.6 addon API; older releases cannot load it at all.
-            case "2.6-1.20.1", "2.6-1.20.4" -> modernLayout ? null : "2.6 layout (Transform.rotationMode/quat, ModelGroup.offset, ModelInstance.getWeldBindings)";
-            default -> "unaudited BBS version";
-        };
+        /* No 1.21.x BBS build has had a silhouette audit of its own — the vanilla renderers and
+         * the Iris path differ from the 1.20.x line the audit walked — so every caster here stays
+         * UNKNOWN and the shadow bake is always a full one. Auditing this line is its own task;
+         * until then a version must not be listed, whatever its members look like. */
+        boolean layout27 = modernLayout && PROCEDURAL_BONES != null && ADDITIONAL_OVERLAYS != null;
+        String layout = layout27 ? "1.21.x silhouette audit not done" : "unaudited BBS version";
         if (layout != null) missing.add(layout);
         boolean audited = missing.isEmpty();
         System.out.println("[irlite] caster-revision bridge: bbs " + BBS_VERSION
@@ -154,6 +178,25 @@ public final class BbsSilhouetteBridge
         }
     }
 
+    /** Getter of the private listener array Fabric keeps on an array-backed event. */
+    private static MethodHandle eventHandlers()
+    {
+        try
+        {
+            Field field = POSE_EVENTS[0].getClass().getDeclaredField("handlers");
+
+            if (!field.getType().isArray()) return null;
+
+            field.setAccessible(true);
+
+            return MethodHandles.lookup().unreflectGetter(field).asType(MethodType.methodType(Object.class, Object.class));
+        }
+        catch (Throwable absent)
+        {
+            return null;
+        }
+    }
+
     private static MethodHandle staticFlag(Class<?> owner, String name)
     {
         try
@@ -181,6 +224,33 @@ public final class BbsSilhouetteBridge
         catch (Throwable failure)
         {
             throw new IllegalStateException("BBS bridge read failed: " + handle, failure);
+        }
+    }
+
+    /**
+     * Listeners registered on 2.7's pose events, or -1 when that cannot be read (which
+     * {@link #AUDITED} already refuses). Zero is the only value a caster can be known at.
+     */
+    public static int poseListeners()
+    {
+        if (EVENT_HANDLERS == null) return -1;
+
+        try
+        {
+            int total = 0;
+
+            for (Object event : POSE_EVENTS)
+            {
+                if (!(EVENT_HANDLERS.invoke(event) instanceof Object[] handlers)) return -1;
+
+                total += handlers.length;
+            }
+
+            return total;
+        }
+        catch (Throwable failure)
+        {
+            return -1;
         }
     }
 

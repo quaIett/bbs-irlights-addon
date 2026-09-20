@@ -54,6 +54,29 @@ final class BbsMobSilhouetteChecks
         x = transform.scale.x;
         try { transform.scale.x *= 1.25f; require(!baseline.equals(sampler.sample(block, td)), "scale"); }
         finally { transform.scale.x = x; }
+        // BBS 2.7: MobFormRenderer merges the extra pose overlay tracks into the single pose it
+        // pushes, so the probe has to see them too.
+        var mobRenderer = (mchorse.bbs_mod.forms.renderers.MobFormRenderer) FormUtilsClient.getRenderer(form);
+        var rig = mobRenderer.getRig();
+        String bone = rig.name(rig.ordered().iterator().next());
+        int poseOverlays = mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.get();
+        try
+        {
+            mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.set(Math.max(1, poseOverlays));
+            form.syncOverlayTracks();
+            require(!form.additionalOverlays.isEmpty(), "pose overlay track created");
+            form.additionalOverlays.get(0).get().getOrCreate(bone).translate.y += 0.35f;
+            require(baseline.pose() != sampler.sample(block, td).pose(), "pose overlay track");
+        }
+        finally
+        {
+            mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.set(0);
+            form.syncOverlayTracks();
+            mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.set(poseOverlays);
+            form.syncOverlayTracks();
+        }
+        require(BbsSilhouetteBridge.poseListeners() == 0, "pose event listeners readable and empty");
+
         var renderer = (MobFormRendererAccessor) FormUtilsClient.getRenderer(form);
         var entity = (VillagerEntity) renderer.irlite$entity();
         float yaw = entity.headYaw, prev = entity.prevHeadYaw;
@@ -76,7 +99,7 @@ final class BbsMobSilhouetteChecks
         ShadowResourceVersions.reloaded();
         require(baseline.resources() != sampler.sample(block, td).resources(), "resource reload");
         require(MobRenderContext.current() == null, "BBS pose cleanup");
-        System.out.println("[irlite] caster-revision-checks: PASS 11 (evaluated Villager MobForm, all part fields restored)");
+        System.out.println("[irlite] caster-revision-checks: PASS 14 (evaluated Villager MobForm, all part fields restored)");
     }
 
     private static void checkPartRestoration(BbsMobSilhouette sampler, ModelBlockEntity block, float td,

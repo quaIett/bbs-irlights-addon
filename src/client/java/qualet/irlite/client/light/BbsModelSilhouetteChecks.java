@@ -99,6 +99,31 @@ final class BbsModelSilhouetteChecks
             if (!existed) pose.transforms.remove(bone);
         }
 
+        // BBS 2.7: the recording settings grow a form extra pose overlay tracks, and the
+        // renderer folds them into the pose it hands us. A change in one has to move the
+        // signature, or an animated overlay would draw against a frozen shadow.
+        int poseOverlays = mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.get();
+        try
+        {
+            mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.set(Math.max(1, poseOverlays));
+            form.syncOverlayTracks();
+            require(!form.additionalOverlays.isEmpty(), "pose overlay track created");
+            checks++;
+            form.additionalOverlays.get(0).get().getOrCreate(bone).translate.y += 0.35f;
+            require(baseline.pose() != sampler.sample(block, td).pose(), "pose overlay track");
+            checks++;
+        }
+        finally
+        {
+            mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.set(0);
+            form.syncOverlayTracks();
+            mchorse.bbs_mod.BBSSettings.recordingPoseOverlays.set(poseOverlays);
+            form.syncOverlayTracks();
+        }
+
+        require(BbsSilhouetteBridge.poseListeners() == 0, "pose event listeners readable and empty");
+        checks++;
+
         // The probe must leave the shared model's live pose untouched, including a live
         // 2.5.2 IK stretch offset, which the probe's own reset must neither leak nor keep.
         ModelGroup first = groups.get(0);

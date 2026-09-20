@@ -4,6 +4,7 @@ import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.forms.MobForm;
 import mchorse.bbs_mod.forms.renderers.MobFormRenderer;
+import mchorse.bbs_mod.forms.renderers.mob.MobPoseApplier;
 import mchorse.bbs_mod.forms.renderers.mob.MobRenderContext;
 import mchorse.bbs_mod.forms.renderers.mob.MobRig;
 import mchorse.bbs_mod.selectors.ISelectorOwnerProvider;
@@ -57,6 +58,8 @@ public final class BbsMobSilhouette
     private CasterRevision sampleEvaluated(ModelBlockEntity block, float tickDelta)
     {
         if (!BbsModelSilhouette.AUDITED) return unknown("BBS version/layout not audited");
+        int poseListeners = BbsSilhouetteBridge.poseListeners();
+        if (poseListeners != 0) return unknown("addon pose listeners registered: " + poseListeners);
         if (block.getProperties() == null) return unknown("model block without properties");
         if (!(block.getProperties().getForm() instanceof MobForm form) || form.getClass() != MobForm.class)
             return unknown("form is not a plain MobForm");
@@ -109,7 +112,11 @@ public final class BbsMobSilhouette
             model.getPart().traverse().forEachOrdered(saved::capture);
             // MobFormRenderer supplies default overlay (v=10) in the shadow path.
             entity.hurtTime = 0;
-            context = MobRenderContext.push(rig, form.pose.get(), form.poseOverlay.get());
+            // BBS 2.7 folds the pose overlay tracks into one pose and pushes it alone, so the
+            // probe has to merge the same way or it evaluates a pose the renderer never draws.
+            form.syncOverlayTracks();
+            context = MobRenderContext.push(rig,
+                MobPoseApplier.merge(form.pose.get(), form.poseOverlay.get(), form.additionalOverlays), null);
             // Use the SAME dispatcher as MobFormRenderer, including its vanilla
             // ground-shadow geometry and camera-dependent alpha. Rendering only
             // vanilla.render would omit that silhouette-relevant output.

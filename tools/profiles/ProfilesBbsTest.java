@@ -19,6 +19,7 @@ import mchorse.bbs_mod.utils.keyframes.factories.KeyframeFactories;
 import org.qualet.irl.light.LightProfile;
 import org.qualet.irl.light.LightRegistry;
 import qualet.irlite.IrliteConfig;
+import qualet.irlite.client.ui.replays.LightReplayTracks;
 import qualet.irlite.client.ui.replays.LightTrackLayout;
 import qualet.irlite.client.ui.replays.LightKeyframeRanges;
 import qualet.irlite.forms.*;
@@ -31,7 +32,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
-/** Real BBS 2.6 copy/save/playback; no game, OpenGL context or UI automation. */
+/** Real BBS 2.7 copy/save/playback; no game, OpenGL context or UI automation. */
 public final class ProfilesBbsTest
 {
     private static int checks;
@@ -44,7 +45,9 @@ public final class ProfilesBbsTest
 
     public static void main(String[] args) throws Exception
     {
-        BBSSettings.recordingPoseTransformOverlays = new ValueInt("test", 0);
+        /* BBS 2.7 split the one "pose and transform overlays" setting in two. */
+        BBSSettings.recordingPoseOverlays = new ValueInt("test", 0);
+        BBSSettings.recordingTransformOverlays = new ValueInt("test", 0);
         BBSSettings.primaryColor = new ValueInt("test", 0x44aaff);
         KeyframeFactories.setup();
         TrackStyle.setup();
@@ -94,7 +97,7 @@ public final class ProfilesBbsTest
         verifyBodyPartReplayOwnership();
         Files.writeString(Path.of(args[0]), "{\"passed\":true,\"bbs\":\"2.6\",\"checks\":" + checks
             + ",\"timelinePlayback\":true,\"legacyForms\":true,\"steppedSelections\":true,\"globalQuality\":true,\"replayUx\":true}");
-        System.out.println("BBS 2.6 profiles PASS: " + checks + " checks");
+        System.out.println("BBS 2.7 profiles PASS: " + checks + " checks");
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -150,7 +153,13 @@ public final class ProfilesBbsTest
             LightTrackLayout.decorate(catalog);
             Set<Object> ids = new HashSet<>();
             for (var track : catalog) check(ids.add(track.id()), "unique grouped track id");
-            check(catalog.stream().anyMatch(t -> t.kind() == TrackKind.BODY_PART), "group headers exist");
+            for (var track : catalog)
+            {
+                boolean own = LightReplayTracks.owns(track);
+                check(!own || LightTrackLayout.sectionFor(track) != null, "light track sits in a section");
+                check(LightReplayTracks.owns(track.id(), true) == own, "only light tracks belong to the Light tab");
+            }
+            check(catalog.stream().anyMatch(t -> LightTrackLayout.expandedByDefault(t) != null), "main sections open by default");
             check(ReplaySelection.isSelectable(new Form() {}) && !ReplaySelection.isSelectable(light), "bare lights are not selectable");
         }
     }
@@ -355,7 +364,8 @@ public final class ProfilesBbsTest
             var catalog = TrackCatalog.of(source, properties);
             LightTrackLayout.decorate(catalog);
             var track = catalog.stream().filter(t -> t.kind() == TrackKind.PROPERTY && t.id().subject().equals("outline_pixel_size")).findFirst().orElseThrow();
-            check(track.title().get().equals("Thickness") && track.parent().formPath().equals("irlights.outline"), "thickness is in the Outline timeline section");
+            check(track.title().get().equals("Thickness")
+                && LightTrackLayout.sectionFor(track).id().equals("irlights_section/outline"), "thickness is in the Outline timeline section");
             FormProperties restored = new FormProperties("properties");
             restored.fromData(properties.toData());
             LightForm live = (LightForm) FormUtils.copy(source);

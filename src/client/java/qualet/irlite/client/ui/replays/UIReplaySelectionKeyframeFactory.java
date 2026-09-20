@@ -32,7 +32,7 @@ public final class UIReplaySelectionKeyframeFactory extends UIKeyframeFactory<St
     @Override
     protected String getDisplayValue()
     {
-        Integer tick = this.editor.getGraph().getAutoKeyframeTick();
+        Float tick = this.editor.getGraph().getAutoKeyframeTick();
         UIKeyframeSheet sheet = tick == null ? null : this.editor.getGraph().getSheet(this.keyframe);
 
         if (sheet != null && ReplaySelectionPlayback.startsAfter(sheet.channel, tick))

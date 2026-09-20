@@ -26,7 +26,9 @@ public final class SpotGuideKeyframesTest
 
     public static void main(String[] args)
     {
-        BBSSettings.recordingPoseTransformOverlays = new ValueInt("test", 0);
+        /* BBS 2.7 split the one "pose and transform overlays" setting in two. */
+        BBSSettings.recordingPoseOverlays = new ValueInt("test", 0);
+        BBSSettings.recordingTransformOverlays = new ValueInt("test", 0);
         KeyframeFactories.setup();
 
         SpotlightForm root = new SpotlightForm();

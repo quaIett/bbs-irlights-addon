@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import re
 import zipfile
 
 parser = argparse.ArgumentParser()
@@ -12,7 +13,9 @@ parser.add_argument("--core", type=Path, required=True)
 parser.add_argument("--mc", required=True)
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
-jar = args.addon / f"build/libs/irlite-1.1.7+mc{args.mc}.jar"
+version = re.search(r"(?m)^mod_version=(\S+)", (args.addon / "gradle.properties").read_text()).group(1)
+core_version = re.search(r'"org\.qualet:irl-core:([^"]+)"', (args.addon / "build.gradle").read_text()).group(1)
+jar = args.addon / f"build/libs/irlite-{version}+mc{args.mc}.jar"
 expected_major = 61 if args.mc.startswith("1.20.") else 65
 with zipfile.ZipFile(jar) as archive:
     cores = [n for n in archive.namelist() if n.startswith("META-INF/jars/irl-core")]
@@ -23,13 +26,13 @@ with zipfile.ZipFile(jar) as archive:
         assert "org/qualet/irl/light/LightProfilesBuffer.class" in core.namelist()
         major = int.from_bytes(core.read("org/qualet/irl/light/LightBuffer.class")[6:8], "big")
         assert major == expected_major, major
-        assert json.loads(core.read("fabric.mod.json"))["version"] == "1.1.7"
+        assert json.loads(core.read("fabric.mod.json"))["version"] == core_version
     patches = list((args.addon / "patches").glob("*.irlights"))
     assert len(patches) == 7
     for patch in patches:
         assert archive.read("assets/irlite/patches/" + patch.name) == patch.read_bytes(), patch
     metadata = json.loads(archive.read("fabric.mod.json"))
-    assert metadata["version"] == "1.1.7+mc" + args.mc
+    assert metadata["version"] == version + "+mc" + args.mc
     assert "bbs-client-addon" in metadata["entrypoints"]
     if not args.mc.startswith("1.20."):
         assert metadata["depends"]["minecraft"] == "~" + args.mc

@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "id": "irlite",
   "version": "${version}",
-  "name": "IRLite",
+  "name": "IRLights",
   "description": "",
   "authors": [
     "wemppy",
     "qualet"
   ],
   "contact": {},
-  "license": "CC-BY-ND-4.0",
+  "license": "MIT",
   "icon": "assets/irlite/icon.png",
   "environment": "*",
   "entrypoints": {

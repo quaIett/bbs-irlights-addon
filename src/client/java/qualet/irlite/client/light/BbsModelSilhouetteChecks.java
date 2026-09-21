@@ -66,7 +66,8 @@ final class BbsModelSilhouetteChecks
         Pose pose = form.pose.get();
         String bone = groups.get(0).id;
         boolean existed = pose.transforms.containsKey(bone);
-        PoseTransform poseTransform = pose.get(bone);
+        // Pose.get no longer creates a missing bone (2.6+); the finally below drops it again.
+        PoseTransform poseTransform = pose.getOrCreate(bone);
         Transform saved = poseTransform.copy();
         try
         {

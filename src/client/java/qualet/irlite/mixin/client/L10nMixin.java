@@ -40,7 +40,7 @@ public class L10nMixin
         self.getKey("irlights.config.patcher.tooltip", "Apply IRLights .irlights files onto shaderpacks");
 
         self.getKey("irlights.config.presets.vl_intensity", "VL intensity");
-        self.getKey("irlights.config.presets.vl_intensity-comment", "Global multiplier on the volumetric light (fog beams) from IRLite lights. Applies instantly every frame without reloading the shaderpack. 1.0 = the pack's default, 0 = IRLite volumetrics off. Shaderpacks patched before this option keep using their compiled VL intensity setting.");
+        self.getKey("irlights.config.presets.vl_intensity-comment", "Global multiplier on the volumetric light (fog beams) from IRLights lights. Applies instantly every frame without reloading the shaderpack. 1.0 = the pack's default, 0 = IRLights volumetrics off. Shaderpacks patched before this option keep using their compiled VL intensity setting.");
 
         self.getKey("irlights.config.presets.max_shader_lights", "Max shader lights");
         self.getKey("irlights.config.presets.max_shader_lights-comment", "Upper bound on how many lights are uploaded to the shader each frame. The injected shader loops over every uploaded light per pixel, so fewer lights is cheaper. When more lights are in range than this, the nearest (highest-priority) ones win; the rest are skipped for lighting but still cast and receive shadows and stay registered. 0 = no limit, and that is the default. Quality presets never touch this knob.");
@@ -55,7 +55,7 @@ public class L10nMixin
         self.getKey("irlights.config.volumetric.vl_max_dist-comment", "Maximum volumetric ray distance in blocks. Longer rays cost more on sky pixels. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime VL globals.");
 
         self.getKey("irlights.config.volumetric.vl_shadows_live", "Beam shadows");
-        self.getKey("irlights.config.volumetric.vl_shadows_live-comment", "Runtime toggle for shadowed volumetric light from IRLite lights. Applies instantly every frame without reloading the shaderpack. Off skips all volumetric shadow taps (beams pass through geometry). Only affects shaderpacks patched with runtime VL flags; older patches ignore it.");
+        self.getKey("irlights.config.volumetric.vl_shadows_live-comment", "Runtime toggle for shadowed volumetric light from IRLights lights. Applies instantly every frame without reloading the shaderpack. Off skips all volumetric shadow taps (beams pass through geometry). Only affects shaderpacks patched with runtime VL flags; older patches ignore it.");
 
         self.getKey("irlights.config.volumetric.vl_shadow_stride", "Shadow tap stride");
         self.getKey("irlights.config.volumetric.vl_shadow_stride-comment", "Tap the IRLights shadow maps every Nth march step and reuse the result in between. 2 roughly halves the volumetric shadow cost for slightly softer shadows; 1 = tap every step. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime VL globals.");
@@ -67,7 +67,7 @@ public class L10nMixin
         self.getKey("irlights.config.volumetric.vl_tip_radius-comment", "Radius of the extra glow around the light source, in blocks. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime VL globals.");
 
         self.getKey("irlights.config.volumetric.vl_noise_live", "Beam noise");
-        self.getKey("irlights.config.volumetric.vl_noise_live-comment", "Runtime toggle for the animated noise in IRLite volumetric light. Applies instantly every frame without reloading the shaderpack. Off skips the noise taps and renders uniform beams. Only affects shaderpacks patched with runtime VL flags; older patches ignore it.");
+        self.getKey("irlights.config.volumetric.vl_noise_live-comment", "Runtime toggle for the animated noise in IRLights volumetric light. Applies instantly every frame without reloading the shaderpack. Off skips the noise taps and renders uniform beams. Only affects shaderpacks patched with runtime VL flags; older patches ignore it.");
 
         self.getKey("irlights.config.volumetric.vl_noise_amount", "Noise amount");
         self.getKey("irlights.config.volumetric.vl_noise_amount-comment", "How strongly the animated noise modulates the beam. Low keeps it mostly uniform, 1 fully breaks it into puffs; average brightness is preserved. Applies instantly every frame without reloading the shaderpack; only affects shaderpacks patched with runtime VL globals.");
